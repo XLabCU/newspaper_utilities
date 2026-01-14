@@ -106,7 +106,7 @@ def main():
     project_root = script_dir.parent
     
     # Switch to your actual output file name (from Step 2)
-    input_file = project_root / "data" / "raw" / "ocr_output_tesseract.jsonl"
+    input_file = project_root / "data" / "raw" / "ocr_output_vision.jsonl"
     output_file = project_root / "data" / "processed" / "articles.json"
     output_file.parent.mkdir(parents=True, exist_ok=True)
 

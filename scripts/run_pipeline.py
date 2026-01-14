@@ -52,7 +52,7 @@ def main():
     )
     parser.add_argument(
         '--ocr-engine',
-        choices=['tesseract', 'paddleocr', 'gemini', 'surya'],
+        choices=['tesseract', 'paddleocr', 'gemini', 'surya', 'ocrmac'],
         default='tesseract',
         help='OCR engine to use: "tesseract" (default/stable), "paddleocr" (deep learning), "gemini" (API), or "surya" (batch)'
     )
@@ -87,6 +87,8 @@ def main():
         ocr_script = "process_pdfs.py"
     elif args.ocr_engine == "surya":
         ocr_script = "process_images_surya_batch.py"
+    elif args.ocr_engine == "ocrmac":
+        ocr_script = "process_images_ocrmac.py"
     else:
         ocr_script = "process_pdfs_tesseract.py"
 
