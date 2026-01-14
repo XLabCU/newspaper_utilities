@@ -121,6 +121,17 @@ Or shift the peak detection a bit:
 # After clean_peaks is built:
 clean_peaks = [p + 10 for p in clean_peaks]  # Nudge boundaries into gutter center
 ```
+If you muck about with the margins, you also need to modify the map for putting things back together:
+
+```
+page_snippets.append({
+    "path": str(snip_path),
+    "x_offset": int(x1_safe),      # Changed from x1
+    "y_offset": int(y1 + start_y),
+    "column": int(c_idx)
+})
+```
+
 ### Quick Parameter Reference
 
 |Parameter|Location|Current|Adjusting truncation along the vertical|
