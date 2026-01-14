@@ -1,248 +1,236 @@
 #!/usr/bin/env python3
 """
-Step 1: Preprocess PDFs (300 DPI) - Memory Efficient Version
-- Processes ONE PAGE AT A TIME to avoid OOM in Colab
-- Hardened against 'Empty Source' OpenCV errors.
-- Bypasses PIL pixel limits for large broadsheets.
-- Discards snippets < 250KB (white space filter).
+Preprocess PDFs: Resize, detect columns, and split into manageable chunks.
+
+Enhanced version with:
+1. Adaptive ROI (Masthead skipping on Page 1)
+2. Hybrid Gutter + Line detection
+3. Scipy-based robust peak detection
 """
 
 import os
 import json
-import gc
 import cv2
 import numpy as np
-import re
-from pathlib import Path
 from pdf2image import convert_from_path
 from PIL import Image
+import argparse
+from pathlib import Path
+import math
+from scipy.signal import find_peaks
 
-# 1. BYPASS PILLOW LIMIT
-Image.MAX_IMAGE_PIXELS = None 
-
-
-def detect_vertical_columns(img_gray):
-    if img_gray is None or img_gray.size == 0: return [0]
-    h, w = img_gray.shape
-    if w < 50: return [0, w]
-
-    binary = cv2.adaptiveThreshold(img_gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-                                   cv2.THRESH_BINARY_INV, 11, 2)
-    roi = binary[int(h*0.1):int(h*0.9), :]
-    v_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 150))
-    v_lines = cv2.morphologyEx(roi, cv2.MORPH_OPEN, v_kernel)
-    v_proj = np.sum(v_lines, axis=0)
-    v_norm = v_proj / (np.max(v_proj) + 1e-6)
-    
-    peaks = [x for x in range(1, len(v_norm)-1) if v_norm[x] > 0.1 and v_norm[x] > v_norm[x-1] and v_norm[x] > v_norm[x+1]]
-    clean_peaks = []
-    min_col_w = w // 12
-    if peaks:
-        clean_peaks.append(peaks[0])
-        for p in peaks[1:]:
-            if p > clean_peaks[-1] + min_col_w: clean_peaks.append(p)
-    return sorted(list(set([0] + clean_peaks + [w])))
-
-
-def detect_horizontal_rules(column_gray):
-    """Refined skew-tolerant horizontal detection."""
-    if column_gray is None or column_gray.size == 0: return [0]
-    h, w = column_gray.shape
-    if h < 100 or w < 10: return [0, h]
-    
-    shave = max(1, int(w * 0.05))
-    inner = column_gray[:, shave:w-shave] if w > 10 else column_gray
-    binary = cv2.adaptiveThreshold(inner, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-                                   cv2.THRESH_BINARY_INV, 11, 2)
-    
-    # Use the 'Narrow Beam' (10%) and 'Bridge' (Morph Close) logic
-    kernel_w = max(10, int(inner.shape[1] * 0.08))
-    h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel_w, 1))
-    
-    detected = cv2.morphologyEx(binary, cv2.MORPH_OPEN, h_kernel)
-    detected = cv2.morphologyEx(detected, cv2.MORPH_CLOSE, h_kernel, iterations=2)
-    
-    y_proj = np.sum(detected, axis=1)
-    max_p = np.max(y_proj)
-    if max_p == 0: return [0, h]
-    
-    peak_thresh = max_p * 0.1 # Lowered threshold for tilted rules
-    dividers = []
-    y = 0
-    while y < h:
-        if y_proj[y] > peak_thresh:
-            dividers.append(y)
-            y += 60 # Skip ahead
-        y += 1
-    return sorted(list(set([0] + dividers + [h])))
-
-
-def get_pdf_page_count(pdf_path):
-    """Get number of pages without loading the whole PDF."""
+def calculate_optimal_dpi(pdf_path, target_mb=4):
+    """Calculate DPI that results in images around target size."""
     try:
-        from pdf2image.pdf2image import pdfinfo_from_path
-        info = pdfinfo_from_path(str(pdf_path))
-        return info.get('Pages', 0)
-    except Exception:
-        # Fallback: try loading first page to check
-        try:
-            convert_from_path(str(pdf_path), dpi=72, first_page=1, last_page=1)
-            # If that works, try to get count another way
-            return 10  # Default guess, will stop when no more pages
-        except:
-            return 0
+        test_images = convert_from_path(pdf_path, dpi=100, first_page=1, last_page=1)
+        test_img = test_images[0]
+        width, height = test_img.size
+        pixels = width * height
+        bytes_per_pixel = 3
+        estimated_mb = (pixels * bytes_per_pixel) / (1024 * 1024)
 
+        if estimated_mb > 0:
+            scale_factor = math.sqrt(target_mb / estimated_mb)
+            optimal_dpi = int(100 * scale_factor)
+            optimal_dpi = max(75, min(200, optimal_dpi))
+        else:
+            optimal_dpi = 100
 
-def process_single_page(pdf_path, page_num, dpi=300):
-    """Convert a single page from PDF to image."""
-    try:
-        images = convert_from_path(
-            str(pdf_path), 
-            dpi=dpi,
-            first_page=page_num,
-            last_page=page_num
-        )
-        if images:
-            return images[0]
+        print(f"  Calculated optimal DPI: {optimal_dpi}")
+        return optimal_dpi
     except Exception as e:
-        print(f"    Error loading page {page_num}: {e}")
-    return None
+        print(f"  Warning: Could not calculate optimal DPI: {e}")
+        return 100
 
+def detect_column_boundaries(image_array, page_num=1, expected_columns=5, debug=False, debug_path=None):
+    """
+    Detect vertical column boundaries using a hybrid of vertical lines and whitespace gutters.
+    """
+    height, width = image_array.shape[:2]
+
+    # 1. Preprocessing
+    if len(image_array.shape) == 3:
+        gray = cv2.cvtColor(image_array, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = image_array
+
+    # Binarize: Text/Lines become 255 (white), Background becomes 0 (black)
+    _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+
+    # 2. Adaptive ROI
+    # Page 1 usually has a large masthead (title). We skip the top ~18%.
+    # Interior pages only need a small margin skip to avoid headers.
+    roi_top = int(height * 0.18) if page_num == 1 else int(height * 0.05)
+    roi_bottom = int(height * 0.98)
+    roi = binary[roi_top:roi_bottom, :]
+
+    # 3. Signal A: Vertical Line Detection (Morphology)
+    # Extracts physical black divider lines
+    line_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 100))
+    line_mask = cv2.morphologyEx(roi, cv2.MORPH_OPEN, line_kernel)
+    line_signal = np.sum(line_mask, axis=0)
+    
+    # 4. Signal B: Gutter Detection (Whitespace)
+    # Smears text horizontally; vertical gaps with 0 pixels are the gutters
+    gutter_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 1))
+    smeared = cv2.dilate(roi, gutter_kernel, iterations=1)
+    gutter_signal = np.sum(smeared, axis=0)
+
+    # 5. Hybrid Scoring
+    # Normalize signals to 0.0 - 1.0
+    line_norm = line_signal / (np.max(line_signal) + 1e-6)
+    # Invert gutter signal (low density = high boundary score)
+    gutter_norm = 1.0 - (gutter_signal / (np.max(gutter_signal) + 1e-6))
+    
+    # Combined score: 70% physical lines, 30% whitespace gutters
+    combined_score = (line_norm * 0.7) + (gutter_norm * 0.3)
+
+    # 6. Peak Detection
+    # distance: Prevents detecting peaks too close together
+    # prominence: Ensures the peak stands out from local noise
+    min_col_width = width // (expected_columns + 2)
+    peaks, _ = find_peaks(combined_score, distance=min_col_width, height=0.1, prominence=0.05)
+
+    # added to try to shift peaks rightward a bit, as per tuning document; you might not want this
+    peaks = [p + 10 for p in peaks]  # Shift boundaries 10px right
+
+    # Convert peaks to full-page boundaries
+    boundaries = [0] + sorted(peaks.tolist()) + [width]
+
+    # Debug visualization
+    if debug and debug_path:
+        import matplotlib.pyplot as plt
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(15, 10))
+        
+        # Profile plot
+        ax1.plot(combined_score, label='Hybrid Score', color='purple')
+        ax1.scatter(peaks, combined_score[peaks], color='red', label='Detected Dividers')
+        ax1.set_title(f'Column Detection Profile (Page {page_num})')
+        ax1.legend()
+
+        # Result Overlay
+        display_img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+        for p in peaks:
+            cv2.line(display_img, (p, 0), (p, height), (0, 0, 255), 3)
+        ax2.imshow(cv2.cvtColor(display_img, cv2.COLOR_BGR2RGB))
+        ax2.set_title('Detected Boundaries')
+        ax2.axis('off')
+
+        plt.tight_layout()
+        plt.savefig(debug_path, dpi=150)
+        plt.close()
+
+    print(f"    Detected {len(boundaries)-1} columns on page {page_num}")
+    return boundaries
+
+def split_into_columns(image_array, boundaries, margin=10):
+    """Split image into columns based on detected boundaries."""
+    columns = []
+    height, width = image_array.shape[:2]
+
+    for i in range(len(boundaries) - 1):
+        x_start = max(0, boundaries[i] - margin)
+        x_end = min(width, boundaries[i + 1] + margin)
+        
+        # original was clipping the right side of the columns a lot, so trying this:
+        #x_start = max(0, boundaries[i] - left_margin)
+        #x_end = min(width, boundaries[i + 1] + right_margin)
+
+        column_img = image_array[:, x_start:x_end]
+
+        metadata = {
+            'column_index': i,
+            'x_offset': x_start,
+            'x_start': boundaries[i],
+            'x_end': boundaries[i + 1],
+            'width': x_end - x_start,
+            'height': height
+        }
+        columns.append((column_img, metadata))
+    return columns
+
+def preprocess_pdf(pdf_path, output_dir, dpi=None, debug=False):
+    """Preprocess a single PDF: convert, detect, split, save."""
+    pdf_name = Path(pdf_path).stem
+    if dpi is None:
+        dpi = calculate_optimal_dpi(pdf_path)
+
+    images = convert_from_path(pdf_path, dpi=dpi)
+    pdf_output_dir = Path(output_dir) / pdf_name
+    pdf_output_dir.mkdir(parents=True, exist_ok=True)
+
+    if debug:
+        (pdf_output_dir / 'debug').mkdir(exist_ok=True)
+
+    pdf_metadata = {'source_pdf': pdf_name, 'dpi': dpi, 'num_pages': len(images), 'pages': []}
+
+    for page_num, image in enumerate(images, start=1):
+        print(f"  Page {page_num}/{len(images)}...")
+        image_array = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+
+        debug_path = pdf_output_dir / 'debug' / f'p{page_num:03d}_detect.png' if debug else None
+        
+        # Pass page_num to trigger Adaptive ROI
+        boundaries = detect_column_boundaries(
+            image_array, 
+            page_num=page_num, 
+            expected_columns=5, 
+            debug=debug, 
+            debug_path=debug_path
+        )
+
+        columns = split_into_columns(image_array, boundaries)
+        page_metadata = {'page_num': page_num, 'boundaries': boundaries, 'columns': []}
+
+        for column_img, col_meta in columns:
+            col_filename = f"{pdf_name}_p{page_num:03d}_c{col_meta['column_index']:02d}.png"
+            col_path = pdf_output_dir / col_filename
+            cv2.imwrite(str(col_path), column_img)
+            col_meta['filename'] = col_filename
+            col_meta['path'] = str(col_path)
+            page_metadata['columns'].append(col_meta)
+
+        pdf_metadata['pages'].append(page_metadata)
+
+    with open(pdf_output_dir / 'metadata.json', 'w') as f:
+        json.dump(pdf_metadata, f, indent=2)
+    return pdf_metadata
 
 def main():
-    # Detect environment
-    try:
-        from google.colab import drive
-        IN_COLAB = True
-        project_root = Path("/content/jan11_exp")
-        print("Running in Google Colab")
-    except ImportError:
-        IN_COLAB = False
-        script_dir = Path(__file__).resolve().parent
-        project_root = script_dir.parent
-        print("Running locally")
+    parser = argparse.ArgumentParser(description='Preprocess PDFs for OCR')
+    parser.add_argument('--input-dir', default='pdfs')
+    parser.add_argument('--output-dir', default='data/preprocessed')
+    parser.add_argument('--dpi', type=int, default=None)
+    parser.add_argument('--debug', action='store_true')
+    args = parser.parse_args()
 
-    pdf_dir = project_root / "pdfs"
-    output_base = project_root / "data" / "preprocessed"
-    output_base.mkdir(parents=True, exist_ok=True)
+    input_dir, output_dir = Path(args.input_dir), Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    pdf_files = sorted(input_dir.glob('*.pdf'))
 
-    MIN_KB = 250
-    DPI = 300
-    MAX_SNIP_HEIGHT = 2000
+    if not pdf_files:
+        print(f"No PDF files found in {input_dir}")
+        return
 
-    pdf_files = sorted(pdf_dir.glob("*.pdf"))
-    print(f"Found {len(pdf_files)} PDFs to process")
-    
+    # This list will store metadata for every PDF processed
     all_metadata = []
 
-    for pdf_idx, pdf_path in enumerate(pdf_files):
-        stem = pdf_path.stem
-        match = re.match(r"(\d+)_(\d{4}-\d{2}-\d{2})", stem)
-        pub_id, pub_date = match.groups() if match else ("000", "0000-00-00")
+    for pdf_path in pdf_files:
+        try:
+            # We capture the returned metadata dictionary
+            metadata = preprocess_pdf(pdf_path, output_dir, args.dpi, debug=args.debug)
+            all_metadata.append(metadata)
+        except Exception as e:
+            print(f"  Error processing {pdf_path.name}: {e}")
 
-        print(f"\n[{pdf_idx+1}/{len(pdf_files)}] Processing: {stem}")
-        
-        # Get page count
-        page_count = get_pdf_page_count(pdf_path)
-        print(f"  Detected {page_count} pages")
+    # CRITICAL: Save the master metadata file that Step 2 (OCR) expects
+    combined_metadata_path = output_dir / 'all_metadata.json'
+    with open(combined_metadata_path, 'w') as f:
+        json.dump(all_metadata, f, indent=2)
 
-        pdf_out_dir = output_base / stem
-        pdf_out_dir.mkdir(parents=True, exist_ok=True)
-        pdf_entry = {"source_pdf": stem, "pub_id": pub_id, "date": pub_date, "pages": []}
+    print(f"\nPreprocessing complete!")
+    print(f"  Processed {len(all_metadata)} PDFs")
+    print(f"  Master metadata saved to: {combined_metadata_path}")
 
-        # Process ONE PAGE AT A TIME
-        page_num = 1
-        consecutive_failures = 0
-        
-        while consecutive_failures < 3:  # Stop after 3 consecutive failures (end of PDF)
-            print(f"  Processing page {page_num}...", end=" ", flush=True)
-            
-            # Load single page
-            page_img = process_single_page(pdf_path, page_num, DPI)
-            
-            if page_img is None:
-                consecutive_failures += 1
-                print("(no page)")
-                page_num += 1
-                continue
-            
-            consecutive_failures = 0  # Reset on success
-            
-            # Convert to grayscale
-            img_gray = cv2.cvtColor(np.array(page_img), cv2.COLOR_RGB2GRAY)
-            
-            # Free the PIL image immediately
-            del page_img
-            gc.collect()
-            
-            v_bounds = detect_vertical_columns(img_gray)
-            page_snippets = []
-
-            for c_idx in range(len(v_bounds)-1):
-                x1, x2 = v_bounds[c_idx], v_bounds[c_idx+1]
-                if (x2 - x1) < 15: continue 
-
-                column_strip = img_gray[:, x1:x2]
-                h_bounds = detect_horizontal_rules(column_strip)
-                
-                for s_idx in range(len(h_bounds)-1):
-                    y1, y2 = h_bounds[s_idx], h_bounds[s_idx+1]
-                    raw_snippet = column_strip[y1:y2, :]
-                    
-                    snip_h = raw_snippet.shape[0]
-                    
-                    # Split logic for long columns
-                    num_parts = (snip_h // MAX_SNIP_HEIGHT) + 1
-                    
-                    for part_idx in range(num_parts):
-                        start_y = part_idx * MAX_SNIP_HEIGHT
-                        end_y = min((part_idx + 1) * MAX_SNIP_HEIGHT, snip_h)
-                        
-                        if start_y >= end_y: continue
-                        
-                        snippet_part = raw_snippet[start_y:end_y, :]
-                        
-                        snip_fn = f"{pub_id}_{pub_date}_p{page_num:02d}_c{c_idx:02d}_s{s_idx:03d}_pt{part_idx}.jpg"
-                        snip_path = pdf_out_dir / snip_fn
-                        
-                        cv2.imwrite(str(snip_path), snippet_part, [int(cv2.IMWRITE_JPEG_QUALITY), 92])
-
-                        # 250KB Check
-                        if os.path.getsize(snip_path) / 1024 < MIN_KB:
-                            os.remove(snip_path)
-                            continue
-
-                        page_snippets.append({
-                            "path": str(snip_path),
-                            "x_offset": int(x1),
-                            "y_offset": int(y1 + start_y),
-                            "column": int(c_idx)
-                        })
-            
-            pdf_entry["pages"].append({"page_num": page_num, "snippets": page_snippets})
-            print(f"{len(page_snippets)} snippets")
-            
-            # Aggressive cleanup after each page
-            del img_gray
-            gc.collect()
-            
-            page_num += 1
-            
-            # Safety check - don't process more than 100 pages
-            if page_num > 100:
-                print("  (reached 100 page limit)")
-                break
-
-        all_metadata.append(pdf_entry)
-        
-        # Save metadata incrementally (in case of crash)
-        with open(output_base / "all_metadata.json", "w") as f:
-            json.dump(all_metadata, f, indent=2)
-        print(f"  Saved metadata ({len(all_metadata)} PDFs processed)")
-
-    print(f"\nDone! Processed {len(all_metadata)} PDFs")
-    print(f"📁 Output: {output_base / 'all_metadata.json'}")
-
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
