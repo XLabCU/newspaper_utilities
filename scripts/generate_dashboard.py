@@ -634,7 +634,7 @@ def generate_dashboard_html(data: dict, config_loader, output_path: Path):
                                 <tr>
                                     <td>${{article.date || '-'}}</td>
                                     <td>${{article.headline || 'Untitled'}}</td>
-                                    <td>${{{(article.tags || []).map(t => t.tag).join(', ')}}</td>
+                                    <td>${{(article.tags || []).map(t => t.tag).join(', ')}}</td>
                                     <td>${{article.word_count || '-'}}</td>
                                 </tr>
                             `).join('')}}
