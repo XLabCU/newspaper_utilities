@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Pipeline Runner Script - Whitechapel in Shawville
-Executes the full 6-step data processing sequence.
-Defaults to Tesseract OCR for M1 stability.
+Pipeline Runner Script - Newspaper Utilities
+Executes the full data processing sequence with configurable parameters.
+Defaults to Tesseract OCR for stability.
 """
 
 import sys
@@ -10,18 +10,28 @@ import subprocess
 import argparse
 from pathlib import Path
 
-def run_script(script_name):
-    """Run a Python script and handle errors"""
+
+def run_script(script_name, extra_args=None):
+    """
+    Run a Python script and handle errors.
+
+    Args:
+        script_name: Name of the script to run
+        extra_args: List of extra arguments to pass to the script
+    """
     script_path = Path(__file__).parent / script_name
     print(f"\n{'=' * 60}")
     print(f"Running: {script_name}")
     print('=' * 60)
 
+    # Build command
+    cmd = [sys.executable, str(script_path)]
+    if extra_args:
+        cmd.extend(extra_args)
+
     try:
-        # We use capture_output=False so you can see the 
-        # real-time progress prints from the OCR and Preprocessor
         result = subprocess.run(
-            [sys.executable, str(script_path)],
+            cmd,
             check=True,
             capture_output=False,
             text=True
@@ -33,25 +43,41 @@ def run_script(script_name):
         print(f"Error: {e}")
         return False
 
+
 def main():
     # Parse command line arguments
     parser = argparse.ArgumentParser(
-        description='Run the Whitechapel in Shawville data processing pipeline',
+        description='Run the newspaper OCR and analysis pipeline',
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument(
         '--ocr-engine',
         choices=['tesseract', 'paddleocr', 'gemini', 'surya'],
         default='tesseract',
-        help='OCR engine to use: "tesseract" (default/stable), "paddleocr" (deep learning), or "gemini"'
+        help='OCR engine to use: "tesseract" (default/stable), "paddleocr" (deep learning), "gemini" (API), or "surya" (batch)'
+    )
+    parser.add_argument(
+        '--config',
+        type=str,
+        default=None,
+        help='Path to configuration file (default: use built-in defaults)'
     )
 
     args = parser.parse_args()
 
+    # Prepare config arguments to pass to scripts
+    config_args = []
+    if args.config:
+        config_args = ['--config', args.config]
+
     print("=" * 60)
-    print("WHITECHAPEL IN SHAWVILLE - DATA PROCESSING PIPELINE")
+    print("NEWSPAPER UTILITIES - DATA PROCESSING PIPELINE")
     print("=" * 60)
     print(f"OCR Engine: {args.ocr_engine.upper()}")
+    if args.config:
+        print(f"Configuration: {args.config}")
+    else:
+        print("Configuration: Default (built-in)")
     print("=" * 60)
 
     # Logic to select Step 2 script
@@ -64,20 +90,24 @@ def main():
     else:
         ocr_script = "process_pdfs_tesseract.py"
 
-    # The Canonical 6-Step Sequence
-    scripts = [
-        "preprocess.py",        # Step 1: 300DPI Snippets + Split at 2000px
-        ocr_script,             # Step 2: The chosen OCR Engine (Default: Tesseract)
-        "segment_articles.py",  # Step 3: JSONL -> Article Grouping
-        "tag_articles.py",      # Step 4: Thematic/Ripper Classification
-        "generate_timeline.py", # Step 5: Historical News Lag Analysis
-        "analyze_text.py"       # Step 6: Linguistic Sensationalism Index
+    # The Pipeline Sequence
+    # Steps that don't use config: preprocess, OCR, segment
+    # Steps that use config: tag, timeline, analyze, entities, dashboard
+    steps = [
+        ("preprocess.py", None),           # Step 1: 300DPI Snippets
+        (ocr_script, None),                # Step 2: OCR Engine
+        ("segment_articles.py", None),     # Step 3: Article Grouping
+        ("tag_articles.py", config_args),  # Step 4: Thematic Classification (configurable)
+        ("generate_timeline.py", config_args),  # Step 5: Timeline Analysis (configurable)
+        ("analyze_text.py", config_args),  # Step 6: Text Analysis (configurable)
+        ("extract_entities_enhanced.py", config_args),  # Step 7: Entity Extraction & Network Analysis (optional)
+        ("generate_dashboard.py", config_args),  # Step 8: Generate HTML Dashboard (optional)
     ]
 
     success_count = 0
 
-    for script in scripts:
-        if run_script(script):
+    for script, extra_args in steps:
+        if run_script(script, extra_args):
             success_count += 1
         else:
             print(f"\nPipeline stopped due to error in {script}")
@@ -86,15 +116,21 @@ def main():
 
     print("\n" + "=" * 60)
     print(f"PIPELINE COMPLETE!")
-    print(f"Successfully completed {success_count}/{len(scripts)} steps")
+    print(f"Successfully completed {success_count}/{len(steps)} steps")
     print("=" * 60)
-    print("\nGenerated data files for visualization:")
-    print("  - data/raw/ocr_output_tesseract.jsonl (Raw OCR)")
-    print("  - data/processed/articles.json        (Segments)")
-    print("  - data/processed/tagged_articles.json (Thematic Data)")
-    print("  - data/processed/timeline.json        (Temporal/Lag Data)")
-    print("  - data/processed/text_analysis.json   (Linguistic Stats)")
-    print("\nReady to launch Whitechapel in Shawville interactive!")
+    print("\nGenerated data files:")
+    print("  - data/raw/ocr_output_*.jsonl        (Raw OCR)")
+    print("  - data/processed/articles.json       (Segments)")
+    print("  - data/processed/tagged_articles.json (Tagged Data)")
+    print("  - data/processed/timeline.json       (Timeline/Correlation)")
+    print("  - data/processed/text_analysis.json  (Linguistic Stats)")
+    print("  - data/processed/entities.json       (Entities)")
+    print("  - data/processed/entity_network.json (Network Data)")
+    print("  - dashboard/index.html               (Interactive Dashboard)")
+    print("\nReady for visualization and analysis!")
+    print("\nTo view the dashboard, open:")
+    print("  dashboard/index.html in your web browser")
+
 
 if __name__ == "__main__":
     main()
