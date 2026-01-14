@@ -96,3 +96,38 @@ dividers = [y where y_proj[y] > peak_thresh, spaced ≥ 60px apart]
 
 OUTPUT: [0] + dividers + [height]
 ```
+
+In the main loop, you can add margins to the column detection like this:
+```
+# In main(), change:
+column_strip = img_gray[:, x1:x2]
+
+# To:
+margin = 15  # Tunable
+x1_safe = max(0, x1 - margin)
+x2_safe = min(img_gray.shape[1], x2 + margin)
+column_strip = img_gray[:, x1_safe:x2_safe]
+```
+You might want to experiment with asymetric edges:
+
+```
+left_margin, right_margin = 5, 20
+x1_safe = max(0, x1 - left_margin)
+x2_safe = min(img_gray.shape[1], x2 + right_margin)
+column_strip = img_gray[:, x1_safe:x2_safe]
+```
+Or shift the peak detection a bit:
+```
+# After clean_peaks is built:
+clean_peaks = [p + 10 for p in clean_peaks]  # Nudge boundaries into gutter center
+```
+### Quick Parameter Reference
+
+|Parameter|Location|Current|Adjusting truncation along the vertical|
+|-|-|-|-|
+|Column margin|`main()` extraction|0|Add 15–25px|
+|`v_kernel` height|`detect_vertical_columns`|150px|Increase if noisy|
+|Peak threshold|`detect_vertical_columns`|0.1|Raise to reduce false positives|
+|`min_col_width` divisor|`detect_vertical_columns`|w÷12|Lower divisor = wider minimum|
+
+
