@@ -4,11 +4,11 @@ Some scripts for working with scans of historical newspapers
 Quick start using Google Colab:
 
 ```
-!git clone https://github.com/shawngraham/jan11_exp.git
-!pip install -r /content/jan11_exp/scripts/requirements.txt
+!git clone https://github.com/XLabCU/newspaper_utilities.git
+!pip install -r /content/newspaper_utilities/scripts/requirements.txt
 !apt-get install -y poppler-utils
 #after restart
-%cd jan11_exp
+%cd newspaper_utilities
 !python scripts/preprocess.py
 !python scripts/process_images_surya_batch.py
 ```
