@@ -10,6 +10,7 @@ import subprocess
 import argparse
 from pathlib import Path
 
+
 def run_script(script_name, extra_args=None):
     """
     Run a Python script and handle errors.
@@ -43,23 +44,57 @@ def run_script(script_name, extra_args=None):
         return False
 
 
+def find_ocr_output_file():
+    """
+    Auto-detect the most recent OCR output file in data/raw/.
+
+    Returns:
+        str: Filename of the OCR output (just the filename, not full path)
+    """
+    script_dir = Path(__file__).resolve().parent
+    project_root = script_dir.parent
+    raw_dir = project_root / "data" / "raw"
+
+    if not raw_dir.exists():
+        print(f"Error: {raw_dir} does not exist")
+        return None
+
+    # Look for OCR output files (both .jsonl and .json)
+    ocr_files = list(raw_dir.glob("ocr_output*.jsonl")) + list(raw_dir.glob("ocr_output*.json"))
+
+    if not ocr_files:
+        print(f"Error: No OCR output files found in {raw_dir}")
+        print("Looking for files matching: ocr_output*.jsonl or ocr_output*.json")
+        return None
+
+    # Sort by modification time, most recent first
+    ocr_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    most_recent = ocr_files[0]
+
+    print(f"Auto-detected OCR file: {most_recent.name}")
+    if len(ocr_files) > 1:
+        print(f"  (Found {len(ocr_files)} OCR files, using most recent)")
+
+    return most_recent.name
+
+
 def main():
     # Parse command line arguments
     parser = argparse.ArgumentParser(
-        description='Run the newspaper OCR and analysis pipeline',
+        description='Run the newspaper analysis part of pipeline',
         formatter_class=argparse.RawDescriptionHelpFormatter
-    )
-    parser.add_argument(
-        '--ocr-engine',
-        choices=['tesseract', 'paddleocr', 'gemini', 'surya', 'ocrmac'],
-        default='tesseract',
-        help='OCR engine to use: "tesseract" (default/stable), "paddleocr" (deep learning), "gemini" (API), or "surya" (batch)'
     )
     parser.add_argument(
         '--config',
         type=str,
         default=None,
         help='Path to configuration file (default: use built-in defaults)'
+    )
+    parser.add_argument(
+        '--ocr-file',
+        type=str,
+        default=None,
+        help='OCR output filename to use (default: auto-detect most recent)'
     )
 
     args = parser.parse_args()
@@ -70,39 +105,33 @@ def main():
         config_args = ['--config', args.config]
 
     print("=" * 60)
-    print("NEWSPAPER UTILITIES - DATA PROCESSING PIPELINE")
+    print("NEWSPAPER UTILITIES - DATA ANALYSIS PIPELINE")
     print("=" * 60)
-    print(f"OCR Engine: {args.ocr_engine.upper()}")
+
     if args.config:
         print(f"Configuration: {args.config}")
     else:
         print("Configuration: Default (built-in)")
     print("=" * 60)
 
-    # Logic to select Step 2 script and determine OCR output filename
-    if args.ocr_engine == "gemini":
-        ocr_script = "process_pdfs_gemini.py"
-        ocr_output_file = "ocr_output.json"
-    elif args.ocr_engine == "paddleocr":
-        ocr_script = "process_pdfs.py"
-        ocr_output_file = "ocr_output.jsonl"
-    elif args.ocr_engine == "surya":
-        ocr_script = "process_images_surya_batch.py"
-        ocr_output_file = "ocr_output.jsonl"
-    elif args.ocr_engine == "ocrmac":
-        ocr_script = "process_images_ocrmac.py"
-        ocr_output_file = "ocr_output_vision.jsonl"
+    # Auto-detect or use specified OCR file
+    if args.ocr_file:
+        ocr_filename = args.ocr_file
+        print(f"Using specified OCR file: {ocr_filename}")
     else:
-        ocr_script = "process_pdfs_tesseract.py"
-        ocr_output_file = "ocr_output_tesseract.jsonl"
+        ocr_filename = find_ocr_output_file()
+        if not ocr_filename:
+            print("\nError: Could not find OCR output file.")
+            print("Please run OCR processing first, or specify --ocr-file")
+            sys.exit(1)
 
-    # The Pipeline Sequence
-    # Steps that don't use config: preprocess, OCR, segment
+    print("=" * 60)
+
+    # The Pipeline Sequence when the ocr'ing has already been done.
+    #
     # Steps that use config: tag, timeline, analyze, entities, dashboard
     steps = [
-        ("preprocess.py", None),           # Step 1: 300DPI Snippets
-        (ocr_script, None),                # Step 2: OCR Engine
-        ("segment_articles.py", ["--input", ocr_output_file]),  # Step 3: Article Grouping
+        ("segment_articles.py", ["--input", ocr_filename]),  # Step 3: Article Grouping (with auto-detected file)
         ("tag_articles.py", config_args),  # Step 4: Thematic Classification (configurable)
         ("generate_timeline.py", config_args),  # Step 5: Timeline Analysis (configurable)
         ("analyze_text.py", config_args),  # Step 6: Text Analysis (configurable)
@@ -125,7 +154,6 @@ def main():
     print(f"Successfully completed {success_count}/{len(steps)} steps")
     print("=" * 60)
     print("\nGenerated data files:")
-    print("  - data/raw/ocr_output_*.jsonl        (Raw OCR)")
     print("  - data/processed/articles.json       (Segments)")
     print("  - data/processed/tagged_articles.json (Tagged Data)")
     print("  - data/processed/timeline.json       (Timeline/Correlation)")
@@ -136,6 +164,7 @@ def main():
     print("\nReady for visualization and analysis!")
     print("\nTo view the dashboard, open:")
     print("  dashboard/index.html in your web browser")
+    print(" or run python serve.py and go to https://localhost:8000")
 
 
 if __name__ == "__main__":
