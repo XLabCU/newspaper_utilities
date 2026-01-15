@@ -44,6 +44,40 @@ def run_script(script_name, extra_args=None):
         return False
 
 
+def find_ocr_output_file():
+    """
+    Auto-detect the most recent OCR output file in data/raw/.
+
+    Returns:
+        str: Filename of the OCR output (just the filename, not full path)
+    """
+    script_dir = Path(__file__).resolve().parent
+    project_root = script_dir.parent
+    raw_dir = project_root / "data" / "raw"
+
+    if not raw_dir.exists():
+        print(f"Error: {raw_dir} does not exist")
+        return None
+
+    # Look for OCR output files (both .jsonl and .json)
+    ocr_files = list(raw_dir.glob("ocr_output*.jsonl")) + list(raw_dir.glob("ocr_output*.json"))
+
+    if not ocr_files:
+        print(f"Error: No OCR output files found in {raw_dir}")
+        print("Looking for files matching: ocr_output*.jsonl or ocr_output*.json")
+        return None
+
+    # Sort by modification time, most recent first
+    ocr_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    most_recent = ocr_files[0]
+
+    print(f"Auto-detected OCR file: {most_recent.name}")
+    if len(ocr_files) > 1:
+        print(f"  (Found {len(ocr_files)} OCR files, using most recent)")
+
+    return most_recent.name
+
+
 def main():
     # Parse command line arguments
     parser = argparse.ArgumentParser(
@@ -56,6 +90,12 @@ def main():
         default=None,
         help='Path to configuration file (default: use built-in defaults)'
     )
+    parser.add_argument(
+        '--ocr-file',
+        type=str,
+        default=None,
+        help='OCR output filename to use (default: auto-detect most recent)'
+    )
 
     args = parser.parse_args()
 
@@ -67,20 +107,31 @@ def main():
     print("=" * 60)
     print("NEWSPAPER UTILITIES - DATA ANALYSIS PIPELINE")
     print("=" * 60)
-   
+
     if args.config:
         print(f"Configuration: {args.config}")
     else:
         print("Configuration: Default (built-in)")
     print("=" * 60)
 
- 
+    # Auto-detect or use specified OCR file
+    if args.ocr_file:
+        ocr_filename = args.ocr_file
+        print(f"Using specified OCR file: {ocr_filename}")
+    else:
+        ocr_filename = find_ocr_output_file()
+        if not ocr_filename:
+            print("\nError: Could not find OCR output file.")
+            print("Please run OCR processing first, or specify --ocr-file")
+            sys.exit(1)
+
+    print("=" * 60)
 
     # The Pipeline Sequence when the ocr'ing has already been done.
-    # 
+    #
     # Steps that use config: tag, timeline, analyze, entities, dashboard
     steps = [
-         ("segment_articles.py", None),     # Step 3: Article Grouping
+        ("segment_articles.py", ["--input", ocr_filename]),  # Step 3: Article Grouping (with auto-detected file)
         ("tag_articles.py", config_args),  # Step 4: Thematic Classification (configurable)
         ("generate_timeline.py", config_args),  # Step 5: Timeline Analysis (configurable)
         ("analyze_text.py", config_args),  # Step 6: Text Analysis (configurable)
