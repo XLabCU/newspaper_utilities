@@ -52,6 +52,10 @@ This will:
 - Extract entities and build networks
 - Generate interactive dashboard
 
+Right now, ocrmac gives good results; Gemini requires an API key; and I'm experimenting with groq and the llama4 maverick model [(see info here)[https://console.groq.com/docs/vision].] If you want to try groq, get an API and set it in your terminal with `export GROQ_API_KEY=<your-api-key-here>` and note you do not put the api key between < and >!. Then run `python scripts/process_pdfs_groq.py`. You might want to play with the prompt to get best results; start with what is in the script, try things out in the [groq playground for this model](https://console.groq.com/playground?model=meta-llama/llama-4-maverick-17b-128e-instruct) until you find something that works well, then put it into the script. 
+
+All of the OCR methods take time; tesseract is fastest.
+
 3. Open `dashboard/index.html` in your browser
 
 ```bash
