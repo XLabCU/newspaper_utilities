@@ -72,7 +72,7 @@ def generate_dashboard_html(data: dict, config_loader, output_path: Path, projec
     # Load preprocessing metadata for image paths
     preprocessing_metadata = load_metadata(project_root)
 
-    # Build article_id to image path mapping
+    # Build article_id to image path mapping (by page and column)
     snippet_map = {}
     for pdf_meta in preprocessing_metadata:
         pdf_stem = pdf_meta.get('source_pdf', '')
@@ -86,18 +86,26 @@ def generate_dashboard_html(data: dict, config_loader, output_path: Path, projec
                     from pathlib import Path as P
                     snip_path_obj = P(snip_path)
                     filename = snip_path_obj.name
-                    # Create article ID pattern matching segment_articles.py output
-                    pub_id = pdf_meta.get('pub_id', '000')
-                    pub_date = pdf_meta.get('date', '0000-00-00')
-                    # Store mapping with relative path
-                    key = f"{pdf_stem}_p{page_num}"
-                    if key not in snippet_map:
-                        snippet_map[key] = []
-                    snippet_map[key].append({
+                    column = snip.get('column', 0)
+
+                    snippet_data = {
                         'filename': filename,
                         'pdf_stem': pdf_stem,
+                        'column': column,
                         'relative_path': f"../data/preprocessed/{pdf_stem}/{filename}"
-                    })
+                    }
+
+                    # Store with page+column key for precise matching
+                    col_key = f"{pdf_stem}_p{page_num}_c{column}"
+                    if col_key not in snippet_map:
+                        snippet_map[col_key] = []
+                    snippet_map[col_key].append(snippet_data)
+
+                    # Also store with page-only key for fallback
+                    page_key = f"{pdf_stem}_p{page_num}"
+                    if page_key not in snippet_map:
+                        snippet_map[page_key] = []
+                    snippet_map[page_key].append(snippet_data)
 
     # Prepare data for embedding - Ensure we have default structures to prevent JS crashes
     timeline_data = json.dumps(data.get('timeline', {}))
@@ -752,19 +760,32 @@ def generate_dashboard_html(data: dict, config_loader, output_path: Path, projec
             const modal = document.getElementById('articleModal');
             const body = document.getElementById('modalBody');
 
-            // Build image HTML from snippet map
+            // Build image HTML from snippet map - match by page AND column
             let imgHtml = "";
-            const pageKey = `${{article.source_pdf}}_p${{article.page_number}}`;
-            const snippets = snippetMap[pageKey];
+            const column = article.column !== undefined ? article.column : 0;
+            const snippetKey = `${{article.source_pdf}}_p${{article.page_number}}_c${{column}}`;
+            const snippets = snippetMap[snippetKey];
 
             if (snippets && snippets.length > 0) {{
-                // Show the first snippet image for this article
-                const snip = snippets[0];
-                imgHtml = `<img src="${{snip.relative_path}}"
-                            class="article-image"
-                            alt="Article image"
-                            onerror="this.style.display='none'"
-                            style="max-width:100%; height:auto; margin:15px 0; border:2px solid var(--accent-bronze); border-radius:5px;">`;
+                // Show all snippet images for this article's column (may be multiple if tall)
+                snippets.forEach(snip => {{
+                    imgHtml += `<img src="${{snip.relative_path}}"
+                                class="article-image"
+                                alt="Article snippet (column ${{column}})"
+                                onerror="this.style.display='none'"
+                                style="max-width:100%; height:auto; margin:15px 0; border:2px solid var(--accent-bronze); border-radius:5px;">`;
+                }});
+            }} else {{
+                // Fallback: try without column (for backwards compatibility)
+                const pageKey = `${{article.source_pdf}}_p${{article.page_number}}`;
+                const pageSnippets = snippetMap[pageKey];
+                if (pageSnippets && pageSnippets.length > 0) {{
+                    imgHtml = `<img src="${{pageSnippets[0].relative_path}}"
+                                class="article-image"
+                                alt="Article image (page-level fallback)"
+                                onerror="this.style.display='none'"
+                                style="max-width:100%; height:auto; margin:15px 0; border:2px solid var(--accent-bronze); border-radius:5px;">`;
+                }}
             }}
 
             body.innerHTML = `
