@@ -21,6 +21,7 @@ def load_data_files(data_dir: Path) -> dict:
         'tagged_articles': 'tagged_articles.json',
         'timeline': 'timeline.json',
         'text_analysis': 'text_analysis.json',
+        'topic_model': 'topic_model.json',
     }
 
     # Optional files
@@ -118,6 +119,7 @@ def generate_dashboard_html(data: dict, config_loader, output_path: Path, projec
     tagged_articles_data = json.dumps(data.get('tagged_articles', {"articles": []}))
     entity_network_data = json.dumps(data.get('entity_cooccurrence_d3', {"nodes": [], "links": []}))
     snippet_map_json = json.dumps(snippet_map)
+    topic_model_data = json.dumps(data.get('topic_model', {"models": []}))
 
     # Generate HTML
     # Note: Double curly braces {{ }} are used to escape CSS/JS braces from Python's f-string
@@ -461,6 +463,44 @@ def generate_dashboard_html(data: dict, config_loader, output_path: Path, projec
         #notepadToggle.hidden {{
             display: none;
         }}
+    
+    .topic-grid {{
+    display: grid; 
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); 
+    gap: 1rem; 
+    margin-top: 1rem; 
+}}
+.topic-card {{ 
+    background: var(--bg-tertiary); 
+    padding: 1rem; 
+    border: 1px solid var(--accent-brass); 
+    border-radius: 4px;
+    box-shadow: inset 0 0 10px rgba(0,0,0,0.5);
+}}
+.topic-card h4 {{ 
+    margin: 0 0 0.5rem 0; 
+    color: var(--accent-copper); 
+    font-family: 'Special Elite';
+    font-size: 0.9rem;
+}}
+.word-pill {{ 
+    display: inline-block; 
+    background: rgba(184, 134, 11, 0.1); 
+    padding: 2px 8px; 
+    border-radius: 10px; 
+    margin: 2px; 
+    font-size: 0.8rem; 
+    border: 1px solid var(--accent-bronze);
+    color: var(--text-secondary);
+}}
+.topic-controls {{ margin-bottom: 1.5rem; }}
+select#groupSelector {{
+    background: var(--bg-tertiary);
+    color: var(--accent-brass);
+    border: 1px solid var(--accent-brass);
+    padding: 8px;
+    font-family: 'Special Elite';
+}}    
     </style>
 </head>
 <body>
@@ -497,7 +537,21 @@ def generate_dashboard_html(data: dict, config_loader, output_path: Path, projec
             <div id="networkGraph"></div>
             <div id="networkLegend" style="margin-top:10px; display:flex; gap:15px; flex-wrap:wrap;"></div>
         </div>
-
+    <div class="section">
+    <h2 class="section-title"><i class="fas fa-gears"></i> Thematic Landscapes</h2>
+        <div class="topic-controls">
+        <label style="font-family:'Special Elite'; color:var(--text-muted);">Switch Analysis Group: </label>
+        <select id="groupSelector" onchange="updateTopicDisplay()"></select>
+        </div>
+    
+        <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 20px;">
+        <div id="topicList" class="topic-grid"></div>
+        <div style="background: var(--bg-tertiary); padding: 1.5rem; border-radius: 8px; border: 1px solid var(--border-color);">
+            <h4 style="font-family:'Special Elite'; color:var(--accent-brass); margin-top:0;">Thematic Evolution Over Time</h4>
+            <div style="height: 350px;"><canvas id="topicTimeline"></canvas></div>
+        </div>
+    </div>
+</div>
         <!-- Article Browser Section -->
         <div class="section">
             <h2 class="section-title"><i class="fas fa-search"></i> Archive Explorer</h2>
@@ -506,7 +560,6 @@ def generate_dashboard_html(data: dict, config_loader, output_path: Path, projec
             <div id="articleTable"></div>
         </div>
     </div>
-
     <!-- Article Detail Modal -->
     <div id="articleModal" class="modal">
         <div class="modal-content">
@@ -549,7 +602,6 @@ def generate_dashboard_html(data: dict, config_loader, output_path: Path, projec
     <!-- JavaScript Libraries -->
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-    <!-- CRITICAL FIX: Date Adapter for Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
 
     <script>
@@ -558,17 +610,18 @@ def generate_dashboard_html(data: dict, config_loader, output_path: Path, projec
         const taggedArticlesData = {tagged_articles_data};
         const entityNetworkData = {entity_network_data};
         const snippetMap = {snippet_map_json};
+        const topicModelData = {topic_model_data}; // New Topic Model Data
+
+        let topicChart = null; // Global reference for the topic chart
 
         document.addEventListener('DOMContentLoaded', () => {{
             console.log("Dashboard Loading...");
-            console.log("Snippet map has", Object.keys(snippetMap).length, "keys");
-            console.log("Sample snippet keys:", Object.keys(snippetMap).slice(0, 5));
-            console.log("Total articles:", (taggedArticlesData.articles || []).length);
-
+            
             // Initialization with error boundaries
             try {{ initializeStats(); }} catch(e) {{ console.error("Stats fail:", e); }}
             try {{ initializeTimeline(); }} catch(e) {{ console.error("Timeline fail:", e); }}
             try {{ initializeNetwork(); }} catch(e) {{ console.error("Network fail:", e); }}
+            try {{ initializeTopicControls(); }} catch(e) {{ console.error("Topic modeling fail:", e); }}
             try {{ initializeArticleBrowser(); }} catch(e) {{ console.error("Browser fail:", e); }}
         }});
 
@@ -588,6 +641,110 @@ def generate_dashboard_html(data: dict, config_loader, output_path: Path, projec
             }}
         }}
 
+        // ================ TOPIC MODELING FUNCTIONS ================
+
+        function initializeTopicControls() {{
+            const selector = document.getElementById('groupSelector');
+            if (!topicModelData.models || topicModelData.models.length === 0) {{
+                console.log("No topic models found in data.");
+                return;
+            }}
+
+            // Populate the dropdown with comparison groups
+            topicModelData.models.forEach(m => {{
+                const opt = document.createElement('option');
+                opt.value = m.group_id;
+                opt.textContent = m.group_label;
+                selector.appendChild(opt);
+            }});
+
+            // Initial render
+            updateTopicDisplay();
+        }}
+
+        function updateTopicDisplay() {{
+            const selector = document.getElementById('groupSelector');
+            if (!selector) return;
+            
+            const groupId = selector.value;
+            const model = topicModelData.models.find(m => m.group_id === groupId);
+            if (!model) return;
+
+            // 1. Render Topic Cards (Word Pills)
+            const listContainer = document.getElementById('topicList');
+            listContainer.innerHTML = '';
+            
+            model.topics.forEach(t => {{
+                const card = document.createElement('div');
+                card.className = 'topic-card';
+                
+                // Take top 8 words for the pill display
+                const words = t.top_words.slice(0, 8).map(w => 
+                    `<span class="word-pill" title="Weight: ${{w.weight.toFixed(4)}}">${{w.word}}</span>`
+                ).join('');
+                
+                card.innerHTML = `<h4>THEME ${{t.topic_id + 1}}</h4>${{words}}`;
+                listContainer.appendChild(card);
+            }});
+
+            // 2. Update the Temporal Topic Chart
+            renderTopicTimeline(model);
+        }}
+
+        function renderTopicTimeline(model) {{
+            const ctx = document.getElementById('topicTimeline').getContext('2d');
+            if (topicChart) topicChart.destroy();
+
+            // Sort months/dates for the X axis
+            const labels = Object.keys(model.temporal_distribution).sort();
+            
+            // Steampunk color palette for topics
+            const colors = [
+                '#b8860b', '#cd7f32', '#8b6f47', '#5a4a3a', '#e8dcc4', 
+                '#4682B4', '#8B0000', '#228B22', '#DAA520', '#A9A9A9'
+            ];
+
+            const datasets = model.topics.map((t, idx) => {{
+                return {{
+                    label: `Theme ${{t.topic_id + 1}}`,
+                    data: labels.map(l => model.temporal_distribution[l][t.topic_id] || 0),
+                    borderColor: colors[idx % colors.length],
+                    backgroundColor: colors[idx % colors.length] + '33', // 20% opacity
+                    fill: true,
+                    tension: 0.4
+                }};
+            }});
+
+            topicChart = new Chart(ctx, {{
+                type: 'line',
+                data: {{ labels: labels, datasets: datasets }},
+                options: {{
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {{
+                        y: {{ 
+                            stacked: true, 
+                            beginAtZero: true, 
+                            grid: {{ color: '#2d2419' }},
+                            ticks: {{ color: '#8b7e66' }}
+                        }},
+                        x: {{ 
+                            grid: {{ color: '#2d2419' }},
+                            ticks: {{ color: '#8b7e66' }}
+                        }}
+                    }},
+                    plugins: {{ 
+                        legend: {{ 
+                            position: 'bottom',
+                            labels: {{ color: '#e8dcc4', font: {{ family: 'Crimson Text', size: 12 }} }} 
+                        }} 
+                    }}
+                }}
+            }});
+        }}
+
+        // ================ EXISTING CORE FUNCTIONS ================
+
         function initializeTimeline() {{
             const container = document.getElementById('timelineChart');
             const rawArticles = taggedArticlesData.articles || [];
@@ -597,7 +754,6 @@ def generate_dashboard_html(data: dict, config_loader, output_path: Path, projec
                 return;
             }}
 
-            // Aggregate counts by day
             const dayCounts = {{}};
             rawArticles.forEach(a => {{
                 if(a.date) {{
@@ -607,7 +763,6 @@ def generate_dashboard_html(data: dict, config_loader, output_path: Path, projec
             }});
 
             const chartData = Object.keys(dayCounts).sort().map(d => ({{ x: d, y: dayCounts[d] }}));
-
             const canvas = document.createElement('canvas');
             container.appendChild(canvas);
 
@@ -628,21 +783,10 @@ def generate_dashboard_html(data: dict, config_loader, output_path: Path, projec
                     responsive: true,
                     maintainAspectRatio: false,
                     scales: {{
-                        x: {{ 
-                            type: 'time', 
-                            time: {{ unit: 'month' }},
-                            ticks: {{ color: '#c9b896' }},
-                            grid: {{ color: '#3d3229' }}
-                        }},
-                        y: {{ 
-                            beginAtZero: true,
-                            ticks: {{ color: '#c9b896', stepSize: 1 }},
-                            grid: {{ color: '#3d3229' }}
-                        }}
+                        x: {{ type: 'time', time: {{ unit: 'month' }}, ticks: {{ color: '#c9b896' }}, grid: {{ color: '#3d3229' }} }},
+                        y: {{ beginAtZero: true, ticks: {{ color: '#c9b896', stepSize: 1 }}, grid: {{ color: '#3d3229' }} }}
                     }},
-                    plugins: {{
-                        legend: {{ labels: {{ color: '#e8dcc4', font: {{ family: 'Crimson Text' }} }} }}
-                    }}
+                    plugins: {{ legend: {{ labels: {{ color: '#e8dcc4', font: {{ family: 'Crimson Text' }} }} }} }}
                 }}
             }});
         }}
@@ -659,15 +803,8 @@ def generate_dashboard_html(data: dict, config_loader, output_path: Path, projec
 
             const width = container.offsetWidth;
             const height = container.offsetHeight;
-
-            const svg = d3.select("#networkGraph").append("svg")
-                .attr("width", "100%")
-                .attr("height", "100%")
-                .attr("viewBox", `0 0 ${{width}} ${{height}}`);
-
+            const svg = d3.select("#networkGraph").append("svg").attr("width", "100%").attr("height", "100%").attr("viewBox", `0 0 ${{width}} ${{height}}`);
             const g = svg.append("g");
-
-            // Zoom functionality
             svg.call(d3.zoom().scaleExtent([0.1, 8]).on("zoom", (e) => g.attr("transform", e.transform)));
 
             const simulation = d3.forceSimulation(nodes)
@@ -676,51 +813,23 @@ def generate_dashboard_html(data: dict, config_loader, output_path: Path, projec
                 .force("center", d3.forceCenter(width / 2, height / 2))
                 .force("collision", d3.forceCollide().radius(25));
 
-            const link = g.append("g")
-                .selectAll("line")
-                .data(links).enter().append("line")
-                .attr("stroke", "#8b6f47")
-                .attr("stroke-opacity", 0.3)
-                .attr("stroke-width", d => Math.sqrt(d.weight || 1));
+            const link = g.append("g").selectAll("line").data(links).enter().append("line")
+                .attr("stroke", "#8b6f47").attr("stroke-opacity", 0.3).attr("stroke-width", d => Math.sqrt(d.weight || 1));
 
-            const node = g.append("g")
-                .selectAll("g")
-                .data(nodes).enter().append("g")
-                .call(d3.drag()
-                    .on("start", dragStarted)
-                    .on("drag", dragged)
-                    .on("end", dragEnded));
+            const node = g.append("g").selectAll("g").data(nodes).enter().append("g")
+                .call(d3.drag().on("start", dragStarted).on("drag", dragged).on("end", dragEnded));
 
-            node.append("circle")
-                .attr("r", d => d.size || 10)
-                .attr("fill", d => d.color || "#b8860b")
-                .attr("stroke", "#1a1410")
-                .attr("stroke-width", 2);
-
-            node.append("text")
-                .text(d => d.name)
-                .attr("fill", "#e8dcc4")
-                .attr("font-size", "10px")
-                .attr("dx", 12)
-                .attr("dy", 4)
-                .style("pointer-events", "none")
-                .style("text-shadow", "1px 1px 2px black");
+            node.append("circle").attr("r", d => d.size || 10).attr("fill", d => d.color || "#b8860b").attr("stroke", "#1a1410").attr("stroke-width", 2);
+            node.append("text").text(d => d.name).attr("fill", "#e8dcc4").attr("font-size", "10px").attr("dx", 12).attr("dy", 4).style("pointer-events", "none").style("text-shadow", "1px 1px 2px black");
 
             simulation.on("tick", () => {{
-                link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
-                    .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+                link.attr("x1", d => d.source.x).attr("y1", d => d.source.y).attr("x2", d => d.target.x).attr("y2", d => d.target.y);
                 node.attr("transform", d => `translate(${{d.x}}, ${{d.y}})`);
             }});
 
-            function dragStarted(e, d) {{
-                if (!e.active) simulation.alphaTarget(0.3).restart();
-                d.fx = d.x; d.fy = d.y;
-            }}
+            function dragStarted(e, d) {{ if (!e.active) simulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; }}
             function dragged(e, d) {{ d.fx = e.x; d.fy = e.y; }}
-            function dragEnded(e, d) {{
-                if (!e.active) simulation.alphaTarget(0);
-                d.fx = null; d.fy = null;
-            }}
+            function dragEnded(e, d) {{ if (!e.active) simulation.alphaTarget(0); d.fx = null; d.fy = null; }}
         }}
 
         function initializeArticleBrowser() {{
@@ -739,17 +848,9 @@ def generate_dashboard_html(data: dict, config_loader, output_path: Path, projec
 
         function renderTable(list) {{
             const container = document.getElementById('articleTable');
-            if(list.length === 0) {{
-                container.innerHTML = "No matching articles found.";
-                return;
-            }}
+            if(list.length === 0) {{ container.innerHTML = "No matching articles found."; return; }}
 
-            let html = `<table>
-                <thead>
-                    <tr><th>Date</th><th>Headline</th><th>Categories</th></tr>
-                </thead>
-                <tbody>`;
-            
+            let html = `<table><thead><tr><th>Date</th><th>Headline</th><th>Categories</th></tr></thead><tbody>`;
             list.slice(0, 100).forEach(a => {{
                 const tags = (a.tags || []).map(t => `<span class="tag-badge">${{t.tag}}</span>`).join('');
                 html += `<tr onclick='showArticleDetail(${{JSON.stringify(a).replace(/'/g, "&apos;")}})'>
@@ -758,112 +859,46 @@ def generate_dashboard_html(data: dict, config_loader, output_path: Path, projec
                     <td>${{tags}}</td>
                 </tr>`;
             }});
-
             html += `</tbody></table>`;
-            if (list.length > 100) html += `<p style='text-align:center; padding:10px;'>Showing first 100 results...</p>`;
             container.innerHTML = html;
         }}
 
         function showArticleDetail(article) {{
             const modal = document.getElementById('articleModal');
             const body = document.getElementById('modalBody');
-
-            // Debug logging
-            console.log('Article:', article);
-            console.log('Looking for snippets with:', {{
-                source_pdf: article.source_pdf,
-                page: article.page_number,
-                column: article.column
-            }});
-
-            // Build image HTML from snippet map - match by page AND column
+            
             let imgHtml = "";
             const column = article.column !== undefined ? article.column : 0;
             const snippetKey = `${{article.source_pdf}}_p${{article.page_number}}_c${{column}}`;
             const pageKey = `${{article.source_pdf}}_p${{article.page_number}}`;
 
-            console.log('Trying snippet key:', snippetKey);
-            const snippets = snippetMap[snippetKey];
-
+            const snippets = snippetMap[snippetKey] || snippetMap[pageKey];
             if (snippets && snippets.length > 0) {{
-                console.log('Found snippets with column match:', snippets);
-                // Show all snippet images for this article's column (may be multiple if tall)
                 imgHtml = '<div style="margin:15px 0;">';
                 snippets.forEach(snip => {{
-                    imgHtml += `<img src="${{snip.relative_path}}"
-                                class="article-image"
-                                alt="Article snippet"
-                                onerror="console.error('Image load error:', this.src); this.style.display='none'; this.nextElementSibling.style.display='block';"
-                                style="max-width:100%; height:auto; margin-bottom:10px; border:2px solid var(--accent-bronze); border-radius:5px; display:block;">
-                                <div style="display:none; color:var(--text-muted); padding:10px; border:1px solid var(--border-color); border-radius:5px;">
-                                    Image not found: ${{snip.relative_path}}
-                                </div>`;
+                    imgHtml += `<img src="${{snip.relative_path}}" class="article-image" style="max-width:100%; height:auto; margin-bottom:10px; border:2px solid var(--accent-bronze); border-radius:5px; display:block;">`;
                 }});
                 imgHtml += '</div>';
             }} else {{
-                // Fallback: try without column (for backwards compatibility)
-                console.log('No column match, trying page key:', pageKey);
-                const pageSnippets = snippetMap[pageKey];
-
-                if (pageSnippets && pageSnippets.length > 0) {{
-                    console.log('Found snippets with page match:', pageSnippets);
-                    imgHtml = `<div style="margin:15px 0;">
-                                <img src="${{pageSnippets[0].relative_path}}"
-                                    class="article-image"
-                                    alt="Article image"
-                                    onerror="console.error('Image load error:', this.src); this.style.display='none'; this.nextElementSibling.style.display='block';"
-                                    style="max-width:100%; height:auto; margin-bottom:10px; border:2px solid var(--accent-bronze); border-radius:5px; display:block;">
-                                <div style="display:none; color:var(--text-muted); padding:10px; border:1px solid var(--border-color); border-radius:5px;">
-                                    Image not found: ${{pageSnippets[0].relative_path}}
-                                </div>
-                            </div>`;
-                }} else {{
-                    console.log('No snippets found. Available keys:', Object.keys(snippetMap).slice(0, 10));
-                    imgHtml = `<div style="margin:15px 0; padding:15px; background:var(--bg-tertiary); border:2px solid var(--border-color); border-radius:5px; color:var(--text-muted);">
-                                <i class="fas fa-image"></i> Snippet image not available for this article<br>
-                                <small>Looking for: ${{snippetKey}} or ${{pageKey}}</small>
-                            </div>`;
-                }}
+                imgHtml = `<div style="padding:15px; background:var(--bg-tertiary); color:var(--text-muted);"><i class="fas fa-image"></i> Snippet image not available.</div>`;
             }}
 
-            // Create two-column layout with image on left, text on right
             body.innerHTML = `
-                <h2 style="color:var(--accent-brass); font-family:'Special Elite'; margin-bottom:10px;">${{article.headline || "Untitled"}}</h2>
-                <p style="color:var(--text-muted); margin-bottom:20px;">
-                    <i class="fas fa-calendar"></i> ${{article.date || "Unknown Date"}} |
-                    <i class="fas fa-file-alt"></i> Page ${{article.page_number || "?"}} |
-                    <i class="fas fa-columns"></i> Column ${{column}}
-                </p>
-                <div style="display:grid; grid-template-columns: 400px 1fr; gap:20px; align-items:start;">
-                    <div style="position:sticky; top:20px;">
-                        ${{imgHtml}}
-                    </div>
-                    <div style="background:var(--bg-primary); padding:20px; border-radius:5px; line-height:1.8; white-space:pre-wrap; min-height:400px;">
-                        ${{article.full_text || "Text content missing."}}
-                    </div>
+                <h2 style="color:var(--accent-brass); font-family:'Special Elite';">${{article.headline || "Untitled"}}</h2>
+                <div style="display:grid; grid-template-columns: 400px 1fr; gap:20px;">
+                    <div>${{imgHtml}}</div>
+                    <div style="background:var(--bg-primary); padding:20px; white-space:pre-wrap; min-height:400px;">${{article.full_text || "Text content missing."}}</div>
                 </div>
             `;
             modal.style.display = "block";
         }}
 
-        function closeModal() {{
-            document.getElementById('articleModal').style.display = "none";
-        }}
+        function closeModal() {{ document.getElementById('articleModal').style.display = "none"; }}
 
-        window.onclick = function(event) {{
-            const modal = document.getElementById('articleModal');
-            if (event.target == modal) closeModal();
-        }}
-
-        // ============== Floating Notepad Functions ==============
-
-        let notepadDragEnabled = false;
-        let notepadOffset = {{ x: 0, y: 0 }};
-
+        // ================ NOTEPAD FUNCTIONS ================
         function toggleNotepad() {{
             const notepad = document.getElementById('floatingNotepad');
             const toggle = document.getElementById('notepadToggle');
-
             if (notepad.style.display === 'none' || notepad.style.display === '') {{
                 notepad.style.display = 'block';
                 toggle.classList.add('hidden');
@@ -874,64 +909,14 @@ def generate_dashboard_html(data: dict, config_loader, output_path: Path, projec
             }}
         }}
 
-        function minimizeNotepad() {{
-            const notepad = document.getElementById('floatingNotepad');
-            notepad.classList.toggle('minimized');
-        }}
+        function minimizeNotepad() {{ document.getElementById('floatingNotepad').classList.toggle('minimized'); }}
+        function saveNotes() {{ localStorage.setItem('researchNotes', document.getElementById('researchNotes').value); alert('Notes saved!'); }}
+        function loadNotes() {{ document.getElementById('researchNotes').value = localStorage.getItem('researchNotes') || ""; updateNoteCount(); }}
+        function updateNoteCount() {{ document.getElementById('noteCount').textContent = `${{document.getElementById('researchNotes').value.length}} characters`; }}
 
-        function saveNotes() {{
-            const notes = document.getElementById('researchNotes').value;
-            localStorage.setItem('researchNotes', notes);
-            localStorage.setItem('researchNotesTimestamp', new Date().toISOString());
-            alert('Notes saved to browser storage!');
-        }}
-
-        function loadNotes() {{
-            const notes = localStorage.getItem('researchNotes');
-            if (notes) {{
-                document.getElementById('researchNotes').value = notes;
-                updateNoteCount();
-            }}
-        }}
-
-        function updateNoteCount() {{
-            const notes = document.getElementById('researchNotes').value;
-            document.getElementById('noteCount').textContent = `${{notes.length}} characters`;
-        }}
-
-        // Auto-update character count
-        document.addEventListener('DOMContentLoaded', () => {{
-            const textarea = document.getElementById('researchNotes');
-            if (textarea) {{
-                textarea.addEventListener('input', updateNoteCount);
-            }}
-
-            // Make notepad draggable
-            const header = document.getElementById('notepadHeader');
-            const notepad = document.getElementById('floatingNotepad');
-
-            header.addEventListener('mousedown', (e) => {{
-                notepadDragEnabled = true;
-                notepadOffset.x = e.clientX - notepad.offsetLeft;
-                notepadOffset.y = e.clientY - notepad.offsetTop;
-                notepad.style.cursor = 'grabbing';
-            }});
-
-            document.addEventListener('mousemove', (e) => {{
-                if (notepadDragEnabled) {{
-                    notepad.style.right = 'auto';
-                    notepad.style.bottom = 'auto';
-                    notepad.style.left = (e.clientX - notepadOffset.x) + 'px';
-                    notepad.style.top = (e.clientY - notepadOffset.y) + 'px';
-                }}
-            }});
-
-            document.addEventListener('mouseup', () => {{
-                notepadDragEnabled = false;
-                notepad.style.cursor = 'default';
-            }});
-        }});
+        window.onclick = function(event) {{ if (event.target == document.getElementById('articleModal')) closeModal(); }}
     </script>
+
 </body>
 </html>
 """

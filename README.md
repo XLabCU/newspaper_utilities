@@ -272,7 +272,20 @@ Outputs:
 - `data/processed/*.graphml` - Network files for Gephi
 - `data/processed/*_d3.json` - D3.js visualization format
 
-### Step 8: Dashboard Generation (`generate_dashboard.py`)
+### Step 8: Topic Modeling
+
+See the topic_model.py script. The script also reads these elements from the config file:
+
+`text_analysis: comparison_groups`
+This is the most critical section for the script.
+*   **`id` & `label`**: Used to identify and name the resulting models (e.g., "Ripper Coverage").
+*   **`filter: tags`**: The script uses this list to pull only articles that have these specific tags (e.g., `whitechapel_ripper`).
+*   **`filter: exclude_tags`**: The script uses this to ensure certain articles are left out of a specific model (e.g., modeling "General News" by excluding anything tagged as "Advertisement").
+
+`text_analysis: custom_stopwords`
+*   **`custom_stopwords`**: The script pulls this list and merges it with the words from `mallet.txt`. 
+
+### Step 9: Dashboard Generation (`generate_dashboard.py`)
 
 Create interactive HTML dashboard.
 
