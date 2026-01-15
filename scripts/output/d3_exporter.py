@@ -53,7 +53,6 @@ class D3Exporter:
         """
         # Create node list
         nodes = []
-        node_index = {node: i for i, node in enumerate(G.nodes())}
 
         for node in G.nodes():
             node_data = {
@@ -83,9 +82,10 @@ class D3Exporter:
         links = []
         for u, v, data in G.edges(data=True):
             link = {
-                'source': node_index[u],
-                'target': node_index[v],
-                'value': data.get('weight', 1)
+                'source': u,  # Use actual node ID (entity name) instead of index
+                'target': v,  # Use actual node ID (entity name) instead of index
+                'value': data.get('weight', 1),
+                'weight': data.get('weight', 1)  # Also include as 'weight' for compatibility
             }
             links.append(link)
 
