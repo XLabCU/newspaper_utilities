@@ -71,6 +71,7 @@ def generate_dashboard_html(data: dict, config_loader, output_path: Path, projec
 
     # Load preprocessing metadata for image paths
     preprocessing_metadata = load_metadata(project_root)
+    print(f"Loaded preprocessing metadata: {len(preprocessing_metadata)} PDF(s)")
 
     # Build article_id to image path mapping (by page and column)
     snippet_map = {}
@@ -106,6 +107,10 @@ def generate_dashboard_html(data: dict, config_loader, output_path: Path, projec
                     if page_key not in snippet_map:
                         snippet_map[page_key] = []
                     snippet_map[page_key].append(snippet_data)
+
+    print(f"Built snippet map with {len(snippet_map)} keys")
+    if len(snippet_map) > 0:
+        print(f"Sample keys: {list(snippet_map.keys())[:5]}")
 
     # Prepare data for embedding - Ensure we have default structures to prevent JS crashes
     timeline_data = json.dumps(data.get('timeline', {}))
@@ -556,7 +561,10 @@ def generate_dashboard_html(data: dict, config_loader, output_path: Path, projec
 
         document.addEventListener('DOMContentLoaded', () => {{
             console.log("Dashboard Loading...");
-            
+            console.log("Snippet map has", Object.keys(snippetMap).length, "keys");
+            console.log("Sample snippet keys:", Object.keys(snippetMap).slice(0, 5));
+            console.log("Total articles:", (taggedArticlesData.articles || []).length);
+
             // Initialization with error boundaries
             try {{ initializeStats(); }} catch(e) {{ console.error("Stats fail:", e); }}
             try {{ initializeTimeline(); }} catch(e) {{ console.error("Timeline fail:", e); }}
@@ -760,42 +768,80 @@ def generate_dashboard_html(data: dict, config_loader, output_path: Path, projec
             const modal = document.getElementById('articleModal');
             const body = document.getElementById('modalBody');
 
+            // Debug logging
+            console.log('Article:', article);
+            console.log('Looking for snippets with:', {{
+                source_pdf: article.source_pdf,
+                page: article.page_number,
+                column: article.column
+            }});
+
             // Build image HTML from snippet map - match by page AND column
             let imgHtml = "";
             const column = article.column !== undefined ? article.column : 0;
             const snippetKey = `${{article.source_pdf}}_p${{article.page_number}}_c${{column}}`;
+            const pageKey = `${{article.source_pdf}}_p${{article.page_number}}`;
+
+            console.log('Trying snippet key:', snippetKey);
             const snippets = snippetMap[snippetKey];
 
             if (snippets && snippets.length > 0) {{
+                console.log('Found snippets with column match:', snippets);
                 // Show all snippet images for this article's column (may be multiple if tall)
+                imgHtml = '<div style="margin:15px 0;">';
                 snippets.forEach(snip => {{
                     imgHtml += `<img src="${{snip.relative_path}}"
                                 class="article-image"
-                                alt="Article snippet (column ${{column}})"
-                                onerror="this.style.display='none'"
-                                style="max-width:100%; height:auto; margin:15px 0; border:2px solid var(--accent-bronze); border-radius:5px;">`;
+                                alt="Article snippet"
+                                onerror="console.error('Image load error:', this.src); this.style.display='none'; this.nextElementSibling.style.display='block';"
+                                style="max-width:100%; height:auto; margin-bottom:10px; border:2px solid var(--accent-bronze); border-radius:5px; display:block;">
+                                <div style="display:none; color:var(--text-muted); padding:10px; border:1px solid var(--border-color); border-radius:5px;">
+                                    Image not found: ${{snip.relative_path}}
+                                </div>`;
                 }});
+                imgHtml += '</div>';
             }} else {{
                 // Fallback: try without column (for backwards compatibility)
-                const pageKey = `${{article.source_pdf}}_p${{article.page_number}}`;
+                console.log('No column match, trying page key:', pageKey);
                 const pageSnippets = snippetMap[pageKey];
+
                 if (pageSnippets && pageSnippets.length > 0) {{
-                    imgHtml = `<img src="${{pageSnippets[0].relative_path}}"
-                                class="article-image"
-                                alt="Article image (page-level fallback)"
-                                onerror="this.style.display='none'"
-                                style="max-width:100%; height:auto; margin:15px 0; border:2px solid var(--accent-bronze); border-radius:5px;">`;
+                    console.log('Found snippets with page match:', pageSnippets);
+                    imgHtml = `<div style="margin:15px 0;">
+                                <img src="${{pageSnippets[0].relative_path}}"
+                                    class="article-image"
+                                    alt="Article image"
+                                    onerror="console.error('Image load error:', this.src); this.style.display='none'; this.nextElementSibling.style.display='block';"
+                                    style="max-width:100%; height:auto; margin-bottom:10px; border:2px solid var(--accent-bronze); border-radius:5px; display:block;">
+                                <div style="display:none; color:var(--text-muted); padding:10px; border:1px solid var(--border-color); border-radius:5px;">
+                                    Image not found: ${{pageSnippets[0].relative_path}}
+                                </div>
+                            </div>`;
+                }} else {{
+                    console.log('No snippets found. Available keys:', Object.keys(snippetMap).slice(0, 10));
+                    imgHtml = `<div style="margin:15px 0; padding:15px; background:var(--bg-tertiary); border:2px solid var(--border-color); border-radius:5px; color:var(--text-muted);">
+                                <i class="fas fa-image"></i> Snippet image not available for this article<br>
+                                <small>Looking for: ${{snippetKey}} or ${{pageKey}}</small>
+                            </div>`;
                 }}
             }}
 
+            // Create two-column layout with image on left, text on right
             body.innerHTML = `
-                <h2 style="color:var(--accent-brass); font-family:'Special Elite'">${{article.headline || "Untitled"}}</h2>
+                <h2 style="color:var(--accent-brass); font-family:'Special Elite'; margin-bottom:10px;">${{article.headline || "Untitled"}}</h2>
                 <p style="color:var(--text-muted); margin-bottom:20px;">
                     <i class="fas fa-calendar"></i> ${{article.date || "Unknown Date"}} |
-                    <i class="fas fa-file-alt"></i> Page ${{article.page_number || "?"}}
+                    <i class="fas fa-file-alt"></i> Page ${{article.page_number || "?"}} |
+                    <i class="fas fa-columns"></i> Column ${{column}}
                 </p>
-                ${{imgHtml}}
-                <div style="background:var(--bg-primary); padding:20px; border-radius:5px; line-height:1.8; white-space:pre-wrap;">${{article.full_text || "Text content missing."}}</div>
+                <div style="display:grid; grid-template-columns: 400px 1fr; gap:20px; align-items:start;">
+                    <div style="position:sticky; top:20px;">
+                        ${{imgHtml}}
+                    </div>
+                    <div style="background:var(--bg-primary); padding:20px; border-radius:5px; line-height:1.8; white-space:pre-wrap; min-height:400px;">
+                        ${{article.full_text || "Text content missing."}}
+                    </div>
+                </div>
             `;
             modal.style.display = "block";
         }}
