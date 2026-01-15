@@ -127,11 +127,15 @@ def fallback_text_extraction(base64_image, width, height):
         return []
 
 def main():
+    # 1. Setup Project Paths
     script_dir = Path(__file__).parent
     project_root = script_dir if (script_dir / "data").exists() else script_dir.parent
     preprocessed_dir = project_root / "data" / "preprocessed"
     output_dir = project_root / "data" / "raw"
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Change extension to .jsonl to reflect the format
+    output_file = output_dir / "ocr_output.jsonl"
 
     metadata_path = preprocessed_dir / "all_metadata.json"
     if not metadata_path.exists():
@@ -141,12 +145,13 @@ def main():
     with open(metadata_path, 'r') as f:
         all_metadata = json.load(f)
 
-    all_results = []
+    # We no longer need the big 'all_results' list in memory
+    print(f"Starting OCR. Writing results to: {output_file}")
 
+    # 2. Process each PDF found in metadata
     for pdf_meta in all_metadata:
         pdf_name = pdf_meta['source_pdf']
         print(f"\nOCRing Snippets for: {pdf_name}")
-        pdf_entry = {"filename": pdf_name, "pages": []}
 
         for page_meta in pdf_meta['pages']:
             print(f"  Page {page_meta['page_num']}...", end="", flush=True)
@@ -156,11 +161,9 @@ def main():
                 snippet_path = snip['path']
                 if not Path(snippet_path).exists(): continue
 
-                # Get cleaned blocks
                 results = groq_ocr(snippet_path)
 
                 for block in results:
-                    # By this point, 'block' is guaranteed to be a dict
                     page_blocks.append({
                         "text": block['text'],
                         "confidence": block['confidence'],
@@ -176,19 +179,23 @@ def main():
                 gc.collect()
                 time.sleep(0.1)
 
-            pdf_entry["pages"].append({
+            # Create the data object for this specific page
+            page_data = {
+                "filename": pdf_name,
                 "page_number": page_meta['page_num'],
                 "text_blocks": page_blocks,
                 "total_blocks": len(page_blocks)
-            })
-            print(f" Done ({len(page_blocks)} blocks)")
+            }
 
-        all_results.append(pdf_entry)
+            # --- JSONL CHANGE: Append this page as a single line immediately ---
+            with open(output_file, 'a', encoding='utf-8') as f:
+                # Use json.dumps to create a single line string
+                line = json.dumps(page_data, ensure_ascii=False, cls=NumpyEncoder)
+                f.write(line + '\n')
+            
+            print(f" Done and Appended ({len(page_blocks)} blocks)")
 
-    output_file = output_dir / "ocr_output.json"
-    with open(output_file, 'w', encoding='utf-8') as f:
-        json.dump({"pdfs": all_results}, f, indent=2, ensure_ascii=False, cls=NumpyEncoder)
-    print(f"\n✓ OCR Success: {output_file}")
+    print(f"\n✓ OCR Process Complete. Output saved as JSONL.")
 
 if __name__ == "__main__":
     main()
