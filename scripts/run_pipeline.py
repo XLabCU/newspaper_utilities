@@ -10,8 +10,6 @@ import subprocess
 import argparse
 from pathlib import Path
 
-<<<<<<< HEAD
-
 def run_script(script_name, extra_args=None):
     """
     Run a Python script and handle errors.
@@ -20,10 +18,6 @@ def run_script(script_name, extra_args=None):
         script_name: Name of the script to run
         extra_args: List of extra arguments to pass to the script
     """
-=======
-def run_script(script_name, script_args=None):
-    """Run a Python script and handle errors"""
->>>>>>> origin/claude/review-ocr-pipeline-uRC5D
     script_path = Path(__file__).parent / script_name
     print(f"\n{'=' * 60}")
     print(f"Running: {script_name}")
@@ -35,16 +29,6 @@ def run_script(script_name, script_args=None):
         cmd.extend(extra_args)
 
     try:
-<<<<<<< HEAD
-=======
-        # Build command with optional arguments
-        cmd = [sys.executable, str(script_path)]
-        if script_args:
-            cmd.extend(script_args)
-
-        # We use capture_output=False so you can see the
-        # real-time progress prints from the OCR and Preprocessor
->>>>>>> origin/claude/review-ocr-pipeline-uRC5D
         result = subprocess.run(
             cmd,
             check=True,
@@ -104,56 +88,32 @@ def main():
         ocr_output_file = "ocr_output.jsonl"
     elif args.ocr_engine == "surya":
         ocr_script = "process_images_surya_batch.py"
-<<<<<<< HEAD
+        ocr_output_file = "ocr_output.jsonl"
     elif args.ocr_engine == "ocrmac":
         ocr_script = "process_images_ocrmac.py"
-=======
-        ocr_output_file = "ocr_output.jsonl"
->>>>>>> origin/claude/review-ocr-pipeline-uRC5D
+        ocr_output_file = "ocr_output_vision.jsonl"
     else:
         ocr_script = "process_pdfs_tesseract.py"
         ocr_output_file = "ocr_output_tesseract.jsonl"
 
-<<<<<<< HEAD
     # The Pipeline Sequence
     # Steps that don't use config: preprocess, OCR, segment
     # Steps that use config: tag, timeline, analyze, entities, dashboard
     steps = [
         ("preprocess.py", None),           # Step 1: 300DPI Snippets
         (ocr_script, None),                # Step 2: OCR Engine
-        ("segment_articles.py", None),     # Step 3: Article Grouping
+        ("segment_articles.py", ["--input", ocr_output_file]),  # Step 3: Article Grouping
         ("tag_articles.py", config_args),  # Step 4: Thematic Classification (configurable)
         ("generate_timeline.py", config_args),  # Step 5: Timeline Analysis (configurable)
         ("analyze_text.py", config_args),  # Step 6: Text Analysis (configurable)
         ("extract_entities_enhanced.py", config_args),  # Step 7: Entity Extraction & Network Analysis (optional)
         ("generate_dashboard.py", config_args),  # Step 8: Generate HTML Dashboard (optional)
-=======
-    # The Canonical 6-Step Sequence
-    # Note: scripts can be tuples of (script_name, [args])
-    scripts = [
-        ("preprocess.py", None),                              # Step 1: 300DPI Snippets + Split at 2000px
-        (ocr_script, None),                                   # Step 2: The chosen OCR Engine (Default: Tesseract)
-        ("segment_articles.py", ["--input", ocr_output_file]), # Step 3: JSONL -> Article Grouping
-        ("tag_articles.py", None),                            # Step 4: Thematic/Ripper Classification
-        ("generate_timeline.py", None),                       # Step 5: Historical News Lag Analysis
-        ("analyze_text.py", None)                             # Step 6: Linguistic Sensationalism Index
->>>>>>> origin/claude/review-ocr-pipeline-uRC5D
     ]
 
     success_count = 0
 
-<<<<<<< HEAD
     for script, extra_args in steps:
         if run_script(script, extra_args):
-=======
-    for script_info in scripts:
-        if isinstance(script_info, tuple):
-            script, script_args = script_info
-        else:
-            script, script_args = script_info, None
-
-        if run_script(script, script_args):
->>>>>>> origin/claude/review-ocr-pipeline-uRC5D
             success_count += 1
         else:
             print(f"\nPipeline stopped due to error in {script}")

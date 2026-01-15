@@ -118,16 +118,10 @@ def main():
 
     script_dir = Path(__file__).resolve().parent
     project_root = script_dir.parent
-<<<<<<< HEAD
-    
-    # Switch to your actual output file name (from Step 2)
-    input_file = project_root / "data" / "raw" / "ocr_output_vision.jsonl"
-=======
 
     # Use command line argument or default
     input_filename = args.input if args.input else "ocr_output_tesseract.jsonl"
     input_file = project_root / "data" / "raw" / input_filename
->>>>>>> origin/claude/review-ocr-pipeline-uRC5D
     output_file = project_root / "data" / "processed" / "articles.json"
     output_file.parent.mkdir(parents=True, exist_ok=True)
 
