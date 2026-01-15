@@ -62,6 +62,32 @@ python scripts/run_pipeline.py --config config/projects/whitechapel_ripper.yaml
 python scripts/run_pipeline.py --ocr-engine surya --config config/projects/my_project.yaml
 ```
 
+### Running Analysis Only (Skip OCR)
+
+If you've already OCR'd your documents and want to re-run just the analysis steps (tagging, timeline, text analysis, entity extraction, dashboard generation), use the data analysis pipeline:
+
+```bash
+# Auto-detects the most recent OCR output file in data/raw/
+python scripts/run_data_analysis.py --config config/projects/your_project.yaml
+
+# Or specify a particular OCR file
+python scripts/run_data_analysis.py --config config/projects/your_project.yaml --ocr-file ocr_output_vision.jsonl
+```
+
+This will:
+- Segment articles from OCR output (auto-detects most recent `ocr_output*.jsonl` or `*.json`)
+- Tag articles by theme
+- Generate timeline correlations
+- Analyze text patterns
+- Extract entities and build networks
+- Generate interactive dashboard
+
+**Use cases:**
+- Experimenting with different configuration parameters
+- Re-generating the dashboard after config changes
+- Running analysis on previously OCR'd documents
+- Faster iteration during research development
+
 ## Configuration
 
 The system uses YAML configuration files to customize analysis for different research projects.
@@ -305,6 +331,30 @@ entity_extraction:
       enabled: true
       threshold: 0.85
 ```
+
+### Entity Filtering
+
+Filter out unwanted entities and OCR artifacts from your network:
+
+```yaml
+entity_extraction:
+  filtering:
+    min_mentions: 2                # Minimum times entity must appear
+    min_entity_length: 3           # Minimum character length
+    max_entity_length: 100         # Maximum character length
+    skip_single_char: true         # Filter single characters
+    skip_all_caps: true            # Filter all-caps (OCR errors)
+    blacklist:                     # Custom blacklist
+      - "Advertisement"
+      - "Continued"
+```
+
+**Default blacklist** (automatically filtered):
+- `Untitled Snippet` - System-generated placeholder
+- `Untitled` - Generic placeholder
+- `Unknown` - Generic unknown value
+
+These filters help clean your network visualization by removing common OCR artifacts and system-generated text.
 
 ### Community Detection
 

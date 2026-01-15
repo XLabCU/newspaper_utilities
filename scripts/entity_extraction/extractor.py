@@ -57,6 +57,14 @@ class EntityExtractor:
         Returns:
             True if entity should be skipped
         """
+        # Check blacklist (common OCR artifacts and system-generated text)
+        blacklist = self.filtering.get('blacklist', [])
+        default_blacklist = ['Untitled Snippet', 'Untitled', 'Unknown']
+        combined_blacklist = set(blacklist + default_blacklist)
+
+        if entity_text in combined_blacklist:
+            return True
+
         # Check minimum length
         min_length = self.filtering.get('min_entity_length', 3)
         if len(entity_text) < min_length:
