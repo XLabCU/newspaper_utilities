@@ -120,16 +120,29 @@ def run_lda(articles, n_topics=5, n_words=10, stop_words=None):
 def main():
     parser = argparse.ArgumentParser(description="Topic Modeling for Newspaper Articles")
     parser.add_argument('--config', type=str, default=None, help='Path to config')
-    parser.add_argument('--topics', type=int, default=5, help='Number of topics to find')
+    # Default is None here so we can tell if the user actually typed it
+    parser.add_argument('--topics', type=int, default=None, help='Override number of topics')
     args = parser.parse_args()
 
+    # Load configuration
     config = load_config(args.config)
     analysis_config = config.get_text_analysis_config()
     
-    # 1. Load Mallet stop words
+    # --- The Logic ---
+    # 1. Get value from YAML (default to 5 if section/key missing)
+    topic_cfg = analysis_config.get('topic_modeling', {})
+    n_topics = topic_cfg.get('n_topics', 5)
+
+    # 2. If user provided a flag in the terminal, it overrides the YAML
+    if args.topics is not None:
+        n_topics = args.topics
+    
+    print(f"Running model with {n_topics} topics...")
+    
+    # 3. Load Mallet stop words
     mallet_stopwords = load_stop_words()
     
-    # 2. Combine with custom stop words from YAML config
+    # 4. Combine with custom stop words from YAML config
     custom_stopwords = set(analysis_config.get('custom_stopwords', []))
     stop_words = mallet_stopwords | custom_stopwords
     

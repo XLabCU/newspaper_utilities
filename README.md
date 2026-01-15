@@ -274,7 +274,15 @@ Outputs:
 
 ### Step 8: Topic Modeling
 
-See the topic_model.py script. The script also reads these elements from the config file:
+See the topic_model.py script. In the config, set:
+
+```
+topic_modeling:
+  n_topics: 8
+  n_top_words: 15
+  iterations: 1000
+```
+The topic model script also reads these elements from the config file:
 
 `text_analysis: comparison_groups`
 This is the most critical section for the script.
@@ -284,6 +292,8 @@ This is the most critical section for the script.
 
 `text_analysis: custom_stopwords`
 *   **`custom_stopwords`**: The script pulls this list and merges it with the words from `mallet.txt`. 
+
+![](topics.png)
 
 ### Step 9: Dashboard Generation (`generate_dashboard.py`)
 
@@ -477,3 +487,5 @@ https://github.com/XLabCU/newspaper_utilities
 - Original Whitechapel in Shawville research project
 - BANQ for historical newspaper archives
 - spaCy, NetworkX, D3.js, and other open-source libraries
+
+![](dash.png)
