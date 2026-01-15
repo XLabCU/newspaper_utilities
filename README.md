@@ -13,6 +13,8 @@ A configurable pipeline for OCR'ing, analyzing, and visualizing historical newsp
 - **Network Analysis**: Co-occurrence networks, temporal analysis, community detection
 - **Interactive Dashboard**: Single-page HTML dashboard with D3.js visualizations
 
+![netviz](netviz.png)
+
 ## Quick Start
 
 ### Installation
@@ -49,6 +51,8 @@ This will:
 - Generate interactive dashboard
 
 3. Open `dashboard/index.html` in your browser
+
+![snippetviz](snippetviz.png)
 
 ### Using Custom Configurations
 
