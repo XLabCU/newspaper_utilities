@@ -8,6 +8,7 @@ Step 3: Article Segmentation
 
 import json
 import re
+import argparse
 from pathlib import Path
 from collections import defaultdict
 from datetime import datetime
@@ -88,8 +89,16 @@ def group_into_articles(blocks):
             if current_article:
                 articles.append(current_article)
 
+            # Extract first 3 words from snippet text as headline
+            text = block["text"].strip()
+            words = text.split()
+            headline = " ".join(words[:3]) if len(words) >= 3 else text
+            # If headline is empty or too short, use the detected headline or fallback
+            if not headline or len(headline) < 3:
+                headline = block["text"] if is_headline else "Untitled Snippet"
+
             current_article = {
-                "headline": block["text"] if is_headline else "Untitled Snippet",
+                "headline": headline,
                 "blocks": [block],
                 "column": block.get("col"),
                 "y_start": block["bbox"][1]
@@ -102,11 +111,23 @@ def group_into_articles(blocks):
     return articles
 
 def main():
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Segment OCR output into articles')
+    parser.add_argument('--input', type=str, help='Input OCR file name (default: ocr_output_tesseract.jsonl)')
+    args = parser.parse_args()
+
     script_dir = Path(__file__).resolve().parent
     project_root = script_dir.parent
+<<<<<<< HEAD
     
     # Switch to your actual output file name (from Step 2)
     input_file = project_root / "data" / "raw" / "ocr_output_vision.jsonl"
+=======
+
+    # Use command line argument or default
+    input_filename = args.input if args.input else "ocr_output_tesseract.jsonl"
+    input_file = project_root / "data" / "raw" / input_filename
+>>>>>>> origin/claude/review-ocr-pipeline-uRC5D
     output_file = project_root / "data" / "processed" / "articles.json"
     output_file.parent.mkdir(parents=True, exist_ok=True)
 

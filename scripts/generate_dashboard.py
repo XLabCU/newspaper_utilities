@@ -64,7 +64,7 @@ def generate_dashboard_html(data: dict, config_loader, output_path: Path, projec
     """Generate comprehensive HTML dashboard with steampunk theme."""
 
     project_metadata = config_loader.get_project_metadata()
-    
+
     # Get project info
     project_name = project_metadata.get('name', 'Newspaper Analysis')
     project_description = project_metadata.get('description', '')
@@ -72,12 +72,39 @@ def generate_dashboard_html(data: dict, config_loader, output_path: Path, projec
     # Load preprocessing metadata for image paths
     preprocessing_metadata = load_metadata(project_root)
 
+    # Build article_id to image path mapping
+    snippet_map = {}
+    for pdf_meta in preprocessing_metadata:
+        pdf_stem = pdf_meta.get('source_pdf', '')
+        for page in pdf_meta.get('pages', []):
+            page_num = page.get('page_num', 0)
+            for snip in page.get('snippets', []):
+                # Extract snippet path
+                snip_path = snip.get('path', '')
+                if snip_path:
+                    # Convert absolute path to relative from dashboard/index.html
+                    from pathlib import Path as P
+                    snip_path_obj = P(snip_path)
+                    filename = snip_path_obj.name
+                    # Create article ID pattern matching segment_articles.py output
+                    pub_id = pdf_meta.get('pub_id', '000')
+                    pub_date = pdf_meta.get('date', '0000-00-00')
+                    # Store mapping with relative path
+                    key = f"{pdf_stem}_p{page_num}"
+                    if key not in snippet_map:
+                        snippet_map[key] = []
+                    snippet_map[key].append({
+                        'filename': filename,
+                        'pdf_stem': pdf_stem,
+                        'relative_path': f"../data/preprocessed/{pdf_stem}/{filename}"
+                    })
+
     # Prepare data for embedding - Ensure we have default structures to prevent JS crashes
     timeline_data = json.dumps(data.get('timeline', {}))
     text_analysis_data = json.dumps(data.get('text_analysis', {}))
     tagged_articles_data = json.dumps(data.get('tagged_articles', {"articles": []}))
     entity_network_data = json.dumps(data.get('entity_cooccurrence_d3', {"nodes": [], "links": []}))
-    preprocessing_metadata_json = json.dumps(preprocessing_metadata)
+    snippet_map_json = json.dumps(snippet_map)
 
     # Generate HTML
     # Note: Double curly braces {{ }} are used to escape CSS/JS braces from Python's f-string
@@ -300,6 +327,127 @@ def generate_dashboard_html(data: dict, config_loader, output_path: Path, projec
             z-index: 100;
             box-shadow: 0 4px 10px black;
         }}
+
+        /* Floating Notepad Styles */
+        #floatingNotepad {{
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 350px;
+            background: var(--bg-secondary);
+            border: 2px solid var(--accent-brass);
+            border-radius: 8px;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.5);
+            z-index: 1000;
+            display: none;
+        }}
+
+        #floatingNotepad.minimized {{
+            height: 50px;
+            overflow: hidden;
+        }}
+
+        .notepad-header {{
+            background: linear-gradient(135deg, var(--accent-brass), var(--accent-bronze));
+            padding: 12px 15px;
+            cursor: move;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-radius: 6px 6px 0 0;
+        }}
+
+        .notepad-title {{
+            font-family: 'Special Elite', monospace;
+            font-weight: bold;
+            color: var(--bg-primary);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }}
+
+        .notepad-controls {{
+            display: flex;
+            gap: 8px;
+        }}
+
+        .notepad-btn {{
+            background: transparent;
+            border: none;
+            color: var(--bg-primary);
+            cursor: pointer;
+            font-size: 16px;
+            padding: 4px 8px;
+            border-radius: 3px;
+            transition: background 0.2s;
+        }}
+
+        .notepad-btn:hover {{
+            background: rgba(0,0,0,0.2);
+        }}
+
+        .notepad-content {{
+            padding: 15px;
+        }}
+
+        #researchNotes {{
+            width: 100%;
+            min-height: 200px;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            border: 1px solid var(--accent-bronze);
+            border-radius: 5px;
+            padding: 10px;
+            font-family: 'Crimson Text', serif;
+            font-size: 14px;
+            line-height: 1.6;
+            resize: vertical;
+        }}
+
+        #researchNotes:focus {{
+            outline: none;
+            border-color: var(--accent-brass);
+        }}
+
+        .notepad-footer {{
+            padding: 10px 15px;
+            background: var(--bg-tertiary);
+            border-radius: 0 0 6px 6px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+            color: var(--text-muted);
+        }}
+
+        #notepadToggle {{
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--accent-brass), var(--accent-copper));
+            border: 3px solid var(--accent-bronze);
+            color: var(--bg-primary);
+            font-size: 24px;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.4);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 999;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }}
+
+        #notepadToggle:hover {{
+            transform: scale(1.1);
+            box-shadow: 0 6px 20px rgba(184, 134, 11, 0.5);
+        }}
+
+        #notepadToggle.hidden {{
+            display: none;
+        }}
     </style>
 </head>
 <body>
@@ -354,6 +502,37 @@ def generate_dashboard_html(data: dict, config_loader, output_path: Path, projec
         </div>
     </div>
 
+    <!-- Floating Notepad -->
+    <button id="notepadToggle" onclick="toggleNotepad()" title="Research Notes">
+        <i class="fas fa-sticky-note"></i>
+    </button>
+
+    <div id="floatingNotepad">
+        <div class="notepad-header" id="notepadHeader">
+            <div class="notepad-title">
+                <i class="fas fa-feather-alt"></i>
+                Research Notes
+            </div>
+            <div class="notepad-controls">
+                <button class="notepad-btn" onclick="minimizeNotepad()" title="Minimize">
+                    <i class="fas fa-minus"></i>
+                </button>
+                <button class="notepad-btn" onclick="toggleNotepad()" title="Close">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        </div>
+        <div class="notepad-content">
+            <textarea id="researchNotes" placeholder="Document your observations and insights here..."></textarea>
+        </div>
+        <div class="notepad-footer">
+            <span id="noteCount">0 characters</span>
+            <button class="notepad-btn" onclick="saveNotes()" title="Save to localStorage" style="color: var(--accent-brass);">
+                <i class="fas fa-save"></i> Save
+            </button>
+        </div>
+    </div>
+
     <!-- JavaScript Libraries -->
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -365,7 +544,7 @@ def generate_dashboard_html(data: dict, config_loader, output_path: Path, projec
         const timelineData = {timeline_data};
         const taggedArticlesData = {tagged_articles_data};
         const entityNetworkData = {entity_network_data};
-        const preprocessingMetadata = {preprocessing_metadata_json};
+        const snippetMap = {snippet_map_json};
 
         document.addEventListener('DOMContentLoaded', () => {{
             console.log("Dashboard Loading...");
@@ -572,21 +751,26 @@ def generate_dashboard_html(data: dict, config_loader, output_path: Path, projec
         function showArticleDetail(article) {{
             const modal = document.getElementById('articleModal');
             const body = document.getElementById('modalBody');
-            
+
+            // Build image HTML from snippet map
             let imgHtml = "";
-            if (preprocessingMetadata.snippets) {{
-                const s = preprocessingMetadata.snippets.find(x => x.article_id === article.article_id);
-                if (s) {{
-                    // Relative path from dashboard/index.html to data/preprocessed/
-                    imgHtml = `<img src="../data/preprocessed/${{s.pdf_stem}}/${{s.filename}}" 
-                                class="article-image" onerror="this.style.display='none'">`;
-                }}
+            const pageKey = `${{article.source_pdf}}_p${{article.page_number}}`;
+            const snippets = snippetMap[pageKey];
+
+            if (snippets && snippets.length > 0) {{
+                // Show the first snippet image for this article
+                const snip = snippets[0];
+                imgHtml = `<img src="${{snip.relative_path}}"
+                            class="article-image"
+                            alt="Article image"
+                            onerror="this.style.display='none'"
+                            style="max-width:100%; height:auto; margin:15px 0; border:2px solid var(--accent-bronze); border-radius:5px;">`;
             }}
 
             body.innerHTML = `
                 <h2 style="color:var(--accent-brass); font-family:'Special Elite'">${{article.headline || "Untitled"}}</h2>
                 <p style="color:var(--text-muted); margin-bottom:20px;">
-                    <i class="fas fa-calendar"></i> ${{article.date || "Unknown Date"}} | 
+                    <i class="fas fa-calendar"></i> ${{article.date || "Unknown Date"}} |
                     <i class="fas fa-file-alt"></i> Page ${{article.page_number || "?"}}
                 </p>
                 ${{imgHtml}}
@@ -603,6 +787,83 @@ def generate_dashboard_html(data: dict, config_loader, output_path: Path, projec
             const modal = document.getElementById('articleModal');
             if (event.target == modal) closeModal();
         }}
+
+        // ============== Floating Notepad Functions ==============
+
+        let notepadDragEnabled = false;
+        let notepadOffset = {{ x: 0, y: 0 }};
+
+        function toggleNotepad() {{
+            const notepad = document.getElementById('floatingNotepad');
+            const toggle = document.getElementById('notepadToggle');
+
+            if (notepad.style.display === 'none' || notepad.style.display === '') {{
+                notepad.style.display = 'block';
+                toggle.classList.add('hidden');
+                loadNotes();
+            }} else {{
+                notepad.style.display = 'none';
+                toggle.classList.remove('hidden');
+            }}
+        }}
+
+        function minimizeNotepad() {{
+            const notepad = document.getElementById('floatingNotepad');
+            notepad.classList.toggle('minimized');
+        }}
+
+        function saveNotes() {{
+            const notes = document.getElementById('researchNotes').value;
+            localStorage.setItem('researchNotes', notes);
+            localStorage.setItem('researchNotesTimestamp', new Date().toISOString());
+            alert('Notes saved to browser storage!');
+        }}
+
+        function loadNotes() {{
+            const notes = localStorage.getItem('researchNotes');
+            if (notes) {{
+                document.getElementById('researchNotes').value = notes;
+                updateNoteCount();
+            }}
+        }}
+
+        function updateNoteCount() {{
+            const notes = document.getElementById('researchNotes').value;
+            document.getElementById('noteCount').textContent = `${{notes.length}} characters`;
+        }}
+
+        // Auto-update character count
+        document.addEventListener('DOMContentLoaded', () => {{
+            const textarea = document.getElementById('researchNotes');
+            if (textarea) {{
+                textarea.addEventListener('input', updateNoteCount);
+            }}
+
+            // Make notepad draggable
+            const header = document.getElementById('notepadHeader');
+            const notepad = document.getElementById('floatingNotepad');
+
+            header.addEventListener('mousedown', (e) => {{
+                notepadDragEnabled = true;
+                notepadOffset.x = e.clientX - notepad.offsetLeft;
+                notepadOffset.y = e.clientY - notepad.offsetTop;
+                notepad.style.cursor = 'grabbing';
+            }});
+
+            document.addEventListener('mousemove', (e) => {{
+                if (notepadDragEnabled) {{
+                    notepad.style.right = 'auto';
+                    notepad.style.bottom = 'auto';
+                    notepad.style.left = (e.clientX - notepadOffset.x) + 'px';
+                    notepad.style.top = (e.clientY - notepadOffset.y) + 'px';
+                }}
+            }});
+
+            document.addEventListener('mouseup', () => {{
+                notepadDragEnabled = false;
+                notepad.style.cursor = 'default';
+            }});
+        }});
     </script>
 </body>
 </html>
