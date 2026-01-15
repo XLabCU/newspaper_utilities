@@ -2,6 +2,8 @@
 
 A configurable pipeline for OCR'ing, analyzing, and visualizing historical newspapers. Extract entities, build networks, analyze text, and generate interactive dashboards - all customizable through YAML configuration files.
 
+[Inspired by a conversation about Jack the Ripper](https://electricarchaeology.ca/2026/01/14/futzing-with-newspaper-ocr/)
+
 ## Features
 
 - **OCR Processing**: Multiple OCR engines (Tesseract, PaddleOCR, Surya, Google Gemini, ocrmac)
@@ -51,6 +53,10 @@ This will:
 - Generate interactive dashboard
 
 3. Open `dashboard/index.html` in your browser
+
+```bash
+python serve.py 
+```
 
 ![snippetviz](snippetviz.png)
 
