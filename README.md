@@ -4,7 +4,7 @@ A configurable pipeline for OCR'ing, analyzing, and visualizing historical newsp
 
 ## Features
 
-- **OCR Processing**: Multiple OCR engines (Tesseract, PaddleOCR, Surya, Google Gemini)
+- **OCR Processing**: Multiple OCR engines (Tesseract, PaddleOCR, Surya, Google Gemini, ocrmac)
 - **Article Segmentation**: Automatic detection of article boundaries
 - **Configurable Tagging**: Define your own research topics and keywords
 - **Timeline Analysis**: Correlate local publications with reference events
